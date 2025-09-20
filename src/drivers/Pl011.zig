@@ -67,7 +67,7 @@ pub fn new(base: usize) Self {
 }
 
 /// Check if the transmit FIFO is full.
-pub fn isTxFull(self: Self) bool {
+fn isTxFull(self: Self) bool {
     return @as(*const volatile Flag, @ptrFromInt(self.base + offsets.fr)).txff;
 }
 
