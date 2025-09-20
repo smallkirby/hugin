@@ -1,7 +1,7 @@
 setenv autostart yes
 
 if load virtio 0 $kernel_addr_r hugin; then
-  bootelf $kernel_addr_r
+  bootelf $kernel_addr_r $fdt_addr
 else
   echo "Failed to load kernel"
 fi

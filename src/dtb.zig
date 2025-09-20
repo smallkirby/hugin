@@ -76,6 +76,20 @@ pub const Dtb = struct {
 
         return .{ .addr = addr, .size = size };
     }
+
+    /// Check if the node is marked as "okay" in the `status` property.
+    pub fn isNodeOperational(self: *const Dtb, node: Node) DtbError!bool {
+        var parser = Parser.new(self.header, node);
+        const status = try parser.getProp("status") orelse return true;
+
+        var iter = Parser.StringIter.new(status.addr, status.len);
+        while (iter.next()) |s| {
+            if (std.mem.eql(u8, s, "okay")) {
+                return true;
+            }
+        }
+        return false;
+    }
 };
 
 const Parser = struct {
@@ -130,7 +144,7 @@ const Parser = struct {
         while (true) {
             try self.consumeNop();
 
-            switch (Token.from(try self.consumeToken())) {
+            switch (Token.from(try self.peekToken())) {
                 // Begins new child node.
                 .begin_node => if (try self.searchByCompat(compat)) |found| {
                     return found;
@@ -138,6 +152,8 @@ const Parser = struct {
 
                 // Property
                 .prop => {
+                    _ = try self.consumeToken();
+
                     const len = try self.consumeU32();
                     const nameoff = try self.consumeU32();
                     const name = self.header.getName(nameoff);
@@ -153,6 +169,7 @@ const Parser = struct {
                     // Check compatible string.
                     if (std.mem.eql(u8, name, prop_compat)) {
                         var iter = StringIter.new(self.ptr, len);
+
                         while (iter.next()) |s| {
                             if (std.mem.eql(u8, s, compat)) {
                                 return Node{
@@ -168,7 +185,10 @@ const Parser = struct {
                 },
 
                 // End of the current node.
-                .end_node => return null,
+                .end_node => {
+                    _ = try self.consumeToken();
+                    return null;
+                },
 
                 // Unhandled tokens.
                 else => return error.UnexpectedToken,

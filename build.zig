@@ -11,7 +11,7 @@ pub fn build(b: *std.Build) void {
     const hugin_module = b.createModule(.{
         .root_source_file = b.path("src/hugin.zig"),
     });
-    hugin_module.addImport("norn", hugin_module);
+    hugin_module.addImport("hugin", hugin_module);
 
     const hugin = b.addExecutable(.{
         .name = "hugin",

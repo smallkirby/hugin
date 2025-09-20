@@ -1,2 +1,5 @@
 /zig-out
 /.zig-cache
+
+*.dts
+*.dtb
