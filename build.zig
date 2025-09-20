@@ -33,7 +33,7 @@ fn getGitSha(b: *std.Build) ![]const u8 {
     };
 }
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build) !void {
     const target = b.resolveTargetQuery(.{
         .cpu_arch = .aarch64,
         .os_tag = .freestanding,
@@ -62,6 +62,18 @@ pub fn build(b: *std.Build) void {
         else
             @panic("Invalid log level");
     };
+
+    const uboot_dir = b.option(
+        []const u8,
+        "uboot",
+        "Path to U-Boot source directory",
+    ) orelse "../u-boot";
+
+    const wait_qemu = b.option(
+        bool,
+        "wait_qemu",
+        "QEMU waits for GDB connection.",
+    ) orelse false;
 
     const options = b.addOptions();
     options.addOption(std.log.Level, "log_level", log_level);
@@ -96,6 +108,63 @@ pub fn build(b: *std.Build) void {
     hugin.root_module.addImport("hugin", hugin_module);
     hugin.root_module.addOptions("options", options);
     b.installArtifact(hugin);
+
+    // =============================================================
+    // Initial image
+    // =============================================================
+
+    const out_dir_name = "disk";
+    const install_hugin = b.addInstallFile(
+        hugin.getEmittedBin(),
+        b.fmt("{s}/{s}", .{ out_dir_name, hugin.name }),
+    );
+    install_hugin.step.dependOn(&hugin.step);
+    b.getInstallStep().dependOn(&install_hugin.step);
+
+    const compile_scr = b.addSystemCommand(&[_][]const u8{
+        "scripts/build_scr.sh",
+        uboot_dir,
+        b.fmt("{s}/{s}/boot.scr", .{ b.install_path, out_dir_name }),
+    });
+    b.getInstallStep().dependOn(&compile_scr.step);
+    compile_scr.step.dependOn(&install_hugin.step);
+
+    // =============================================================
+    // Run QEMU
+    // =============================================================
+
+    var qemu_args = std.array_list.Aligned([]const u8, null).empty;
+    defer qemu_args.deinit(b.allocator);
+    try qemu_args.appendSlice(b.allocator, &.{
+        "qemu-system-aarch64",
+        "-M",
+        "virt,gic-version=3,secure=off,virtualization=on",
+        "-m",
+        "1G",
+        "-bios",
+        b.fmt("{s}/u-boot.bin", .{uboot_dir}),
+        "-cpu",
+        "cortex-a53",
+        "-device",
+        "virtio-blk-device,drive=disk",
+        "-drive",
+        b.fmt("file=fat:rw:{s}/{s},format=raw,if=none,media=disk,id=disk", .{ b.install_path, out_dir_name }),
+        "-nographic",
+        "-serial",
+        "mon:stdio",
+        "-no-reboot",
+        "-smp",
+        "3",
+        "-s",
+        "-d",
+        "guest_errors",
+    });
+    if (wait_qemu) try qemu_args.append(b.allocator, "-S");
+
+    const qemu_cmd = b.addSystemCommand(qemu_args.items);
+    qemu_cmd.step.dependOn(b.getInstallStep());
+    const run_qemu = b.step("run", "Run Hugin on QEMU");
+    run_qemu.dependOn(&qemu_cmd.step);
 
     // =============================================================
     // Unit tests
