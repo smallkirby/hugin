@@ -4,6 +4,8 @@ pub const std_options = std.Options{
     .logFn = hugin.klog.log,
     .log_level = hugin.klog.log_level,
 };
+/// Override the panic function.
+pub const panic = @import("panic.zig").panic_fn;
 
 /// Kernel entry point.
 export fn main(argc: usize, argv: [*]const [*:0]const u8) callconv(.c) usize {
