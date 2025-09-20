@@ -13,9 +13,9 @@ pub const DtbError = error{
     UnexpectedToken,
 };
 
-/// Flattened Devicetree Blob (DTB).
+/// Flattened Devicetree Blob.
 pub const Dtb = struct {
-    /// Header.
+    /// Pointer to the FDT header.
     header: *const FdtHeader,
 
     const magic: u32 = 0xD00DFEED;
@@ -42,16 +42,12 @@ pub const Dtb = struct {
     /// If `current` is not `null`, search starts from the given node.
     pub fn searchNode(self: *const Dtb, compat: []const u8, current: ?Node) DtbError!?Node {
         var parser = Parser.new(self.header, current);
-        while (true) {
-            _ = parser.readToken() catch |err| switch (err) {
-                DtbError.UnexpectedEof => return null,
-                else => return err,
-            };
 
+        while (!parser.isEmpty()) {
             if (try parser.searchByCompat(compat)) |found| {
                 return found;
             }
-        }
+        } else return null;
     }
 
     /// Read the register value at the given index from the `reg` property of the node.
@@ -91,24 +87,14 @@ const Parser = struct {
     const default_addr_cells: u32 = 2;
     const default_size_cells: u32 = 1;
 
-    /// Predefined token type.
-    const Token = [token_align]u8;
+    const Chunk = [token_align]u8;
     /// Alignment for structure block tokens.
     const token_align: usize = 0x4;
-
-    // Predefined tokens.
-    const tok_begin_node: Token = [_]u8{ 0x00, 0x00, 0x00, 0x01 };
-    const tok_end_node: Token = [_]u8{ 0x00, 0x00, 0x00, 0x02 };
-    const tok_prop: Token = [_]u8{ 0x00, 0x00, 0x00, 0x03 };
-    const tok_nop: Token = [_]u8{ 0x00, 0x00, 0x00, 0x04 };
-    const tok_end: Token = [_]u8{ 0x00, 0x00, 0x00, 0x09 };
 
     // Predefined property names.
     const prop_addr_cells = "address-cells";
     const prop_size_cells = "size-cells";
-    const prop_reg = "reg";
     const prop_compat = "compatible";
-    const prop_status = "status";
 
     pub fn new(header: *const FdtHeader, current: ?Node) Parser {
         if (current) |cur| {
@@ -128,143 +114,146 @@ const Parser = struct {
         }
     }
 
-    /// Find a node with the given compatible string in the current node and its children.
+    /// Find a node with the given "compatible" string in the current node and its children.
     pub fn searchByCompat(self: *Parser, compat: []const u8) DtbError!?Node {
-        try self.skipNop();
-        if (!std.mem.eql(u8, &try self.readToken(), &tok_begin_node)) {
+        try self.consumeNop();
+        if (!Token.eql(.begin_node, try self.consumeToken())) {
             return error.UnexpectedToken;
         }
-        try self.skipToken();
 
         // Skip until NULL terminator.
-        while (@as(*const u8, @ptrFromInt(self.ptr)).* != 0) : (self.ptr += 1) {}
-        self.ptr += 1;
-        try self.skipPadding();
-
-        const cur_ptr = self.ptr;
+        while (self.consumeByte() != '\x00') {}
+        try self.consumePadding();
 
         // Iterate over the inner nodes.
+        const cur_ptr = self.ptr;
         while (true) {
-            try self.skipPadding();
-            try self.skipNop();
-            const tok = try self.readToken();
+            try self.consumeNop();
 
-            // New node begins.
-            if (std.mem.eql(u8, &tok, &tok_begin_node)) {
-                if (try self.searchByCompat(compat)) |found| {
+            switch (Token.from(try self.consumeToken())) {
+                // Begins new child node.
+                .begin_node => if (try self.searchByCompat(compat)) |found| {
                     return found;
-                }
-            }
+                },
 
-            // Property.
-            if (std.mem.eql(u8, &tok, &tok_prop)) {
-                try self.skipToken();
-                const len = tokenToU32(try self.readToken());
-                try self.skipToken();
-                const nameoff = tokenToU32(try self.readToken());
-                try self.skipToken();
+                // Property
+                .prop => {
+                    const len = try self.consumeU32();
+                    const nameoff = try self.consumeU32();
+                    const name = self.header.getName(nameoff);
 
-                const name = self.header.getName(nameoff);
-                // Update address cells.
-                if (std.mem.eql(u8, name, prop_addr_cells)) {
-                    self.addr_cells = tokenToU32(try self.readToken());
-                }
-                // Update size cells.
-                if (std.mem.eql(u8, name, prop_size_cells)) {
-                    self.size_cells = tokenToU32(try self.readToken());
-                }
-                // Check compatible string.
-                if (std.mem.eql(u8, name, prop_compat)) {
-                    var iter = StringIter.new(self.ptr, len);
-                    while (iter.next()) |s| {
-                        if (std.mem.eql(u8, s, compat)) {
-                            return Node{
-                                .addr = cur_ptr,
-                                .addr_cells = self.addr_cells,
-                                .size_cells = self.size_cells,
-                            };
+                    // Update address cells.
+                    if (std.mem.eql(u8, name, prop_addr_cells)) {
+                        self.addr_cells = try self.consumeU32();
+                    }
+                    // Update size cells.
+                    if (std.mem.eql(u8, name, prop_size_cells)) {
+                        self.size_cells = try self.consumeU32();
+                    }
+                    // Check compatible string.
+                    if (std.mem.eql(u8, name, prop_compat)) {
+                        var iter = StringIter.new(self.ptr, len);
+                        while (iter.next()) |s| {
+                            if (std.mem.eql(u8, s, compat)) {
+                                return Node{
+                                    .addr = cur_ptr,
+                                    .addr_cells = self.addr_cells,
+                                    .size_cells = self.size_cells,
+                                };
+                            }
                         }
                     }
-                }
 
-                self.ptr += len;
-            }
+                    self.ptr += len;
+                },
 
-            // End of node.
-            if (std.mem.eql(u8, &tok, &tok_end_node)) {
-                return null;
+                // End of the current node.
+                .end_node => return null,
+
+                // Unhandled tokens.
+                else => return error.UnexpectedToken,
             }
         }
     }
 
-    /// Get a property value by name.
+    /// Get a property value by name within the current node.
     pub fn getProp(self: *Parser, name: []const u8) DtbError!?Property {
         while (true) {
-            try self.skipPadding();
-            try self.skipPadding();
-            const tok = try self.readToken();
+            try self.consumeNop();
 
-            if (std.mem.eql(u8, &tok, &tok_begin_node)) {
-                return null;
-            }
-            if (std.mem.eql(u8, &tok, &tok_end)) {
-                return null;
-            }
-            if (std.mem.eql(u8, &tok, &tok_end_node)) {
-                return null;
-            }
+            switch (Token.from(try self.consumeToken())) {
+                // End of the current node.
+                .begin_node, .end, .end_node => return null,
 
-            if (std.mem.eql(u8, &tok, &tok_prop)) {
-                try self.skipToken();
-                const len = tokenToU32(try self.readToken());
-                try self.skipToken();
-                const nameoff = tokenToU32(try self.readToken());
-                try self.skipToken();
+                // Property
+                .prop => {
+                    const len = try self.consumeU32();
+                    const nameoff = try self.consumeU32();
 
-                const prop_name = self.header.getName(nameoff);
-                if (std.mem.eql(u8, prop_name, name)) {
-                    return Property{
-                        .addr = self.ptr,
-                        .addr_cells = self.addr_cells,
-                        .size_cells = self.size_cells,
-                        .len = len,
-                    };
-                }
+                    const prop_name = self.header.getName(nameoff);
+                    if (std.mem.eql(u8, prop_name, name)) {
+                        return Property{
+                            .addr = self.ptr,
+                            .addr_cells = self.addr_cells,
+                            .size_cells = self.size_cells,
+                            .len = len,
+                        };
+                    }
 
-                self.ptr += len;
+                    self.ptr += len;
+                },
+
+                // Unhandled tokens.
+                else => return error.UnexpectedToken,
             }
         }
+    }
+
+    /// Check if the parser reached the end of the data.
+    pub fn isEmpty(self: Parser) bool {
+        return self.ptr >= self.header.structAddr() + self.header.structSize();
+    }
+
+    /// Consume a byte and return it.
+    fn consumeByte(self: *Parser) u8 {
+        const b = @as(*const u8, @ptrFromInt(self.ptr)).*;
+        self.ptr += 1;
+        return b;
+    }
+
+    /// Consume the current token and return it as `u32`.
+    fn consumeU32(self: *Parser) DtbError!u32 {
+        const token = try self.consumeToken();
+        return bits.fromBigEndian(@as(*const u32, @ptrCast(@alignCast(&token))).*);
+    }
+
+    /// Consume the current token and return it.
+    fn consumeToken(self: *Parser) DtbError!Chunk {
+        const tok = try self.peekToken();
+        self.ptr += token_align;
+        return tok;
     }
 
     /// Read the next 4 bytes.
     ///
     /// Pointer is not advanced.
-    fn readToken(self: *Parser) DtbError!Token {
+    fn peekToken(self: *Parser) DtbError!Chunk {
         if (self.ptr >= self.header.structAddr() + self.header.structSize()) {
             return DtbError.UnexpectedEof;
         } else {
-            return @as(*Token, @ptrFromInt(self.ptr)).*;
+            return @as(*Chunk, @ptrFromInt(self.ptr)).*;
         }
     }
 
-    /// Skip the current token.
-    fn skipToken(self: *Parser) DtbError!void {
-        self.ptr += token_align;
-    }
-
     /// Skip tokens until a non-nop token is found.
-    fn skipNop(self: *Parser) DtbError!void {
-        while (std.mem.eql(u8, &try self.readToken(), &tok_nop)) : (self.ptr += token_align) {}
+    fn consumeNop(self: *Parser) DtbError!void {
+        try self.consumePadding();
+        while (Token.eql(.nop, try self.peekToken())) : (self.ptr += token_align) {}
     }
 
     /// Discard bytes to the next alignment boundary.
-    fn skipPadding(self: *Parser) DtbError!void {
+    fn consumePadding(self: *Parser) DtbError!void {
         self.ptr = bits.roundup(self.ptr, token_align);
-    }
-
-    /// Convert a token to `u32`.
-    fn tokenToU32(token: Token) u32 {
-        return bits.fromBigEndian(@as(*const u32, @ptrCast(@alignCast(&token))).*);
     }
 
     /// Iterator over a null-terminated strings.
@@ -296,6 +285,25 @@ const Parser = struct {
             const ret = self.cur[0..(end - self.cur)];
             self.cur = end + 1;
             return ret;
+        }
+    };
+
+    /// DTB tokens.
+    const Token = enum(u32) {
+        begin_node = 0x1,
+        end_node = 0x2,
+        prop = 0x3,
+        nop = 0x4,
+        end = 0x9,
+        _,
+
+        pub fn from(value: Chunk) Token {
+            const v = @as(*const u32, @ptrCast(@alignCast(&value))).*;
+            return @enumFromInt(bits.fromBigEndian(v));
+        }
+
+        pub fn eql(lhr: Token, rhr: Chunk) bool {
+            return lhr == Token.from(rhr);
         }
     };
 };
@@ -430,8 +438,8 @@ test "Parser.nop" {
     const dtb = try Dtb.new(@intFromPtr(bin.ptr));
     var parser = Parser.new(dtb.header, null);
 
-    try parser.skipNop();
-    try testing.expectEqual(Parser.tok_begin_node, try parser.readToken());
+    try parser.consumeNop();
+    try testing.expectEqual([_]u8{ 0x00, 0x00, 0x00, 0x01 }, try parser.peekToken());
 }
 
 test "Parser.reg" {
