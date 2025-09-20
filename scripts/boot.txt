@@ -1,0 +1,9 @@
+setenv autostart yes
+
+if load virtio 0 $kernel_addr_r hugin; then
+  bootelf $kernel_addr_r
+else
+  echo "Failed to load kernel"
+fi
+
+sleep 1000000000

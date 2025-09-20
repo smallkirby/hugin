@@ -1,0 +1,12 @@
+.{
+    .name = .hugin,
+    .version = "0.0.0",
+    .fingerprint = 0x602cda2bd008582a,
+    .minimum_zig_version = "0.15.1",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
