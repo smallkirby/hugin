@@ -53,13 +53,22 @@ pub const page_mask_2mib: u64 = size_2mib - 1;
 /// Mask for a 1G page.
 pub const page_mask_1gib: u64 = size_1gib - 1;
 
+/// General memory allocator.
+pub const general_allocator = bin_allocator_instance.getAllocator();
+/// General page allocator that can be used to allocate physically contiguous pages.
+pub const page_allocator = buddy_allocator_instance.getAllocator();
+
 /// One and only instance of the buddy allocator.
 var buddy_allocator_instance = BuddyAllocator.new();
 const BuddyAllocator = @import("mem/BuddyAllocator.zig");
+/// One and only instance of the bin allocator.
+var bin_allocator_instance = BinAllocator.newUninit();
+const BinAllocator = @import("mem/BinAllocator.zig");
 
 /// Initialize allocators
-pub fn initAllocators(avail: PhysRegion, reserveds: []PhysRegion, log_fn: hugin.klog.LogFn) MemError!void {
+pub fn initAllocators(avail: PhysRegion, reserveds: []PhysRegion, log_fn: hugin.klog.LogFn) void {
     buddy_allocator_instance.init(avail, reserveds, log_fn);
+    bin_allocator_instance.init(buddy_allocator_instance.getAllocator());
 }
 
 /// Translate the given virtual address to physical address.
@@ -92,6 +101,15 @@ pub fn phys2virt(addr: anytype) Virt {
     };
 
     return value;
+}
+
+// =============================================================
+// Tests
+// =============================================================
+
+test {
+    _ = BuddyAllocator;
+    _ = BinAllocator;
 }
 
 // =============================================================

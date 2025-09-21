@@ -61,7 +61,7 @@ pub fn terminateQemu(status: u8) void {
 
 /// Halt the CPU indefinitely.
 pub fn endlessHalt() noreturn {
-    // TODO: disable IRD
+    // TODO: disable IRQ
     while (true) {
         arch.halt();
     }
@@ -72,7 +72,9 @@ pub fn endlessHalt() noreturn {
 // =============================================================
 
 test {
+    _ = bits;
     _ = dtb;
+    _ = mem;
 }
 
 // =============================================================

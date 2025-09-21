@@ -230,6 +230,7 @@ pub fn build(b: *std.Build) !void {
         .use_llvm = false,
     });
     hugin_unit_test.root_module.addImport("hugin", hugin_unit_test.root_module);
+    hugin_unit_test.root_module.addOptions("options", options);
     const run_hugin_unit_test = b.addRunArtifact(hugin_unit_test);
 
     const unit_test_step = b.step("test", "Run unit tests");

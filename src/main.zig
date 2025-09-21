@@ -192,7 +192,7 @@ fn setupMemory(dtb: hugin.dtb.Dtb, elf: usize, sp: usize) !void {
     hugin.rtt.expect(num_reserveds <= max_num_reserveds);
 
     // Init allocators.
-    try hugin.mem.initAllocators(
+    hugin.mem.initAllocators(
         avail,
         reserveds[0..num_reserveds],
         log.info,
