@@ -57,6 +57,25 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8) !void {
         hugin.rtt.expectEqual(2, hugin.arch.getCurrentEl());
     }
 
+    // Setup memory.
+    {
+        const memory_node = try dtb.searchNode(
+            .{ .name = "memory" },
+            null,
+        ) orelse {
+            log.err("Failed to find memory node from DTB", .{});
+            return error.SearchMemoryNode;
+        };
+        const memory_reg = try dtb.readRegProp(memory_node, 0) orelse {
+            log.err("Failed to read reg property of memory node", .{});
+            return error.NoRegProperty;
+        };
+        log.info("Memory available @ 0x{X:0>16} - 0x{X:0>16}", .{
+            memory_reg.addr,
+            memory_reg.addr + memory_reg.size,
+        });
+    }
+
     // Setup hypervisor configuration.
     {
         const hcr_el2 = std.mem.zeroInit(hugin.arch.regs.HcrEl2, .{

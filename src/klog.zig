@@ -37,6 +37,11 @@ pub fn log(
     comptime fmt: []const u8,
     args: anytype,
 ) void {
+    if (!serial.isInitialized()) {
+        @branchHint(.cold);
+        return;
+    }
+
     const level_str = comptime switch (level) {
         .debug => "[DEBUG]",
         .info => "[INFO ]",
