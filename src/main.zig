@@ -50,6 +50,8 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8) !void {
         log.info("", .{});
         log.info("Hello from EL#{d}", .{hugin.arch.getCurrentEl()});
         log.info("", .{});
+
+        hugin.rtt.expectEqual(2, hugin.arch.getCurrentEl());
     }
 
     // Setup hypervisor configuration.

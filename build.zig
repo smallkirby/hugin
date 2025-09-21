@@ -76,6 +76,11 @@ pub fn build(b: *std.Build) !void {
         "Path to QEMU install directory",
     ) orelse b.fmt("{s}/qemu-aarch64", .{home});
 
+    const is_runtime_test = b.option(
+        bool,
+        "runtime_test",
+        "Specify if the build is for the runtime testing.",
+    ) orelse false;
     const wait_qemu = b.option(
         bool,
         "wait_qemu",
@@ -84,6 +89,7 @@ pub fn build(b: *std.Build) !void {
 
     const options = b.addOptions();
     options.addOption(std.log.Level, "log_level", log_level);
+    options.addOption(bool, "is_runtime_test", is_runtime_test);
     options.addOption([]const u8, "sha", try getGitSha(b));
 
     // =============================================================
@@ -168,6 +174,7 @@ pub fn build(b: *std.Build) !void {
         "guest_errors",
     });
     if (wait_qemu) try qemu_args.append(b.allocator, "-S");
+    if (is_runtime_test) try qemu_args.append(b.allocator, "-semihosting");
 
     const qemu_cmd = b.addSystemCommand(qemu_args.items);
     qemu_cmd.step.dependOn(b.getInstallStep());
