@@ -17,6 +17,8 @@ zig build test --summary all
 |---|---|---|---|
 | `log_level` | String: `debug`, `info`, `warn`, `error` | Logging level. Output under the logging level is suppressed. | `info` |
 | `optimize` | String: `Debug`, `ReleaseFast`, `ReleaseSmall` | Optimization level. | `Debug` |
+| `uboot` | String | Path to U-Boot install directory. | `"$HOME/u-boot"` |
+| `qemu` | String | Path to QEMU aarch64 install directory. | `"$HOME/qemu-aarch64"` |
 | `wait_qemu` | Flag | Make QEMU wait for being attached by GDB. | `false` |
 
 ## License

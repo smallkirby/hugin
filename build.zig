@@ -41,6 +41,8 @@ pub fn build(b: *std.Build) !void {
     });
     const optimize = b.standardOptimizeOption(.{});
 
+    const home = std.process.getEnvVarOwned(b.allocator, "HOME") catch "..";
+
     // =============================================================
     // Options
     // =============================================================
@@ -67,7 +69,12 @@ pub fn build(b: *std.Build) !void {
         []const u8,
         "uboot",
         "Path to U-Boot source directory",
-    ) orelse "../u-boot";
+    ) orelse b.fmt("{s}/u-boot", .{home});
+    const qemu_dir = b.option(
+        []const u8,
+        "qemu",
+        "Path to QEMU install directory",
+    ) orelse b.fmt("{s}/qemu-aarch64", .{home});
 
     const wait_qemu = b.option(
         bool,
@@ -133,10 +140,11 @@ pub fn build(b: *std.Build) !void {
     // Run QEMU
     // =============================================================
 
+    const qemu_bin = b.fmt("{s}/bin/qemu-system-aarch64", .{qemu_dir});
     var qemu_args = std.array_list.Aligned([]const u8, null).empty;
     defer qemu_args.deinit(b.allocator);
     try qemu_args.appendSlice(b.allocator, &.{
-        "qemu-system-aarch64",
+        qemu_bin,
         "-M",
         "virt,gic-version=3,secure=off,virtualization=on",
         "-m",
