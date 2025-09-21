@@ -30,7 +30,10 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8) !void {
 
     // Initialize UART.
     {
-        const pl011_node = try dtb.searchNode("arm,pl011", null) orelse {
+        const pl011_node = try dtb.searchNode(
+            .{ .compat = "arm,pl011" },
+            null,
+        ) orelse {
             return error.SearchPl011Node;
         };
         if (!try dtb.isNodeOperational(pl011_node)) {

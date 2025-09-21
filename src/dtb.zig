@@ -13,6 +13,13 @@ pub const DtbError = error{
     UnexpectedToken,
 };
 
+pub const SearchOption = union(enum) {
+    /// Find by `compatible` property.
+    compat: []const u8,
+    /// Find by node name.
+    name: []const u8,
+};
+
 /// Flattened Devicetree Blob.
 pub const Dtb = struct {
     /// Pointer to the FDT header.
@@ -40,11 +47,11 @@ pub const Dtb = struct {
     /// Search for a node with the given compatible string.
     ///
     /// If `current` is not `null`, search starts from the given node.
-    pub fn searchNode(self: *const Dtb, compat: []const u8, current: ?Node) DtbError!?Node {
+    pub fn searchNode(self: *const Dtb, option: SearchOption, current: ?Node) DtbError!?Node {
         var parser = Parser.new(self.header, current);
 
         while (!parser.isEmpty()) {
-            if (try parser.searchByCompat(compat)) |found| {
+            if (try parser.search(option)) |found| {
                 return found;
             }
         } else return null;
@@ -95,8 +102,7 @@ pub const Dtb = struct {
 const Parser = struct {
     header: *const FdtHeader,
     ptr: usize,
-    addr_cells: u32,
-    size_cells: u32,
+    state: State,
 
     const default_addr_cells: u32 = 2;
     const default_size_cells: u32 = 1;
@@ -105,54 +111,73 @@ const Parser = struct {
     /// Alignment for structure block tokens.
     const token_align: usize = 0x4;
 
+    /// Parser state for the current node.
+    const State = struct {
+        addr_cells: u32 = default_addr_cells,
+        size_cells: u32 = default_size_cells,
+    };
+
     // Predefined property names.
-    const prop_addr_cells = "address-cells";
-    const prop_size_cells = "size-cells";
+    const prop_addr_cells = "#address-cells";
+    const prop_size_cells = "#size-cells";
     const prop_compat = "compatible";
 
     pub fn new(header: *const FdtHeader, current: ?Node) Parser {
-        if (current) |cur| {
-            return Parser{
-                .header = header,
-                .ptr = cur.addr,
-                .addr_cells = cur.addr_cells,
-                .size_cells = cur.size_cells,
-            };
-        } else {
-            return Parser{
-                .header = header,
-                .ptr = header.structAddr(),
-                .addr_cells = default_addr_cells,
-                .size_cells = default_size_cells,
-            };
-        }
+        const ptr = if (current) |cur| cur.addr else header.structAddr();
+        const state = if (current) |cur| State{
+            .addr_cells = cur.addr_cells,
+            .size_cells = cur.size_cells,
+        } else State{};
+
+        return Parser{
+            .header = header,
+            .ptr = ptr,
+            .state = state,
+        };
     }
 
-    /// Find a node with the given "compatible" string in the current node and its children.
-    pub fn searchByCompat(self: *Parser, compat: []const u8) DtbError!?Node {
+    /// Find a node with the given search option.
+    ///
+    /// This function searches recursively within the first node.
+    /// When a matching node is found, the parser state is undefined.
+    pub fn search(self: *Parser, option: SearchOption) DtbError!?Node {
         try self.consumeNop();
-        if (!Token.eql(.begin_node, try self.consumeToken())) {
+        if (!Token.eql(.begin_node, try self.consumeChunk())) {
             return error.UnexpectedToken;
         }
 
-        // Skip until NULL terminator.
-        while (self.consumeByte() != '\x00') {}
+        // Compare node name.
+        const node_name = try self.consumeString();
         try self.consumePadding();
 
-        // Iterate over the inner nodes.
+        if (option == .name) {
+            var iter = std.mem.splitAny(u8, node_name, "@");
+            while (iter.next()) |part| {
+                if (std.mem.eql(u8, part, option.name)) {
+                    return Node{
+                        .addr = self.ptr,
+                        .addr_cells = self.state.addr_cells,
+                        .size_cells = self.state.size_cells,
+                    };
+                }
+            }
+        }
+
+        // Iterate over properties and child nodes.
         const cur_ptr = self.ptr;
+        const cur_state = self.state;
         while (true) {
             try self.consumeNop();
 
-            switch (Token.from(try self.peekToken())) {
+            switch (Token.from(try self.peekChunk())) {
                 // Begins new child node.
-                .begin_node => if (try self.searchByCompat(compat)) |found| {
+                .begin_node => if (try self.search(option)) |found| {
                     return found;
                 },
 
                 // Property
                 .prop => {
-                    _ = try self.consumeToken();
+                    _ = try self.consumeChunk();
 
                     const len = try self.consumeU32();
                     const nameoff = try self.consumeU32();
@@ -160,22 +185,23 @@ const Parser = struct {
 
                     // Update address cells.
                     if (std.mem.eql(u8, name, prop_addr_cells)) {
-                        self.addr_cells = try self.consumeU32();
+                        self.state.addr_cells = try self.peekU32();
                     }
                     // Update size cells.
                     if (std.mem.eql(u8, name, prop_size_cells)) {
-                        self.size_cells = try self.consumeU32();
+                        self.state.size_cells = try self.peekU32();
                     }
+
                     // Check compatible string.
-                    if (std.mem.eql(u8, name, prop_compat)) {
+                    if ((option == .compat) and std.mem.eql(u8, name, prop_compat)) {
                         var iter = StringIter.new(self.ptr, len);
 
                         while (iter.next()) |s| {
-                            if (std.mem.eql(u8, s, compat)) {
+                            if (std.mem.eql(u8, s, option.compat)) {
                                 return Node{
                                     .addr = cur_ptr,
-                                    .addr_cells = self.addr_cells,
-                                    .size_cells = self.size_cells,
+                                    .addr_cells = self.state.addr_cells,
+                                    .size_cells = self.state.size_cells,
                                 };
                             }
                         }
@@ -186,9 +212,13 @@ const Parser = struct {
 
                 // End of the current node.
                 .end_node => {
-                    _ = try self.consumeToken();
+                    _ = try self.consumeChunk();
+                    self.state = cur_state;
                     return null;
                 },
+
+                // End of data.
+                .end => return null,
 
                 // Unhandled tokens.
                 else => return error.UnexpectedToken,
@@ -201,7 +231,7 @@ const Parser = struct {
         while (true) {
             try self.consumeNop();
 
-            switch (Token.from(try self.consumeToken())) {
+            switch (Token.from(try self.consumeChunk())) {
                 // End of the current node.
                 .begin_node, .end, .end_node => return null,
 
@@ -214,8 +244,8 @@ const Parser = struct {
                     if (std.mem.eql(u8, prop_name, name)) {
                         return Property{
                             .addr = self.ptr,
-                            .addr_cells = self.addr_cells,
-                            .size_cells = self.size_cells,
+                            .addr_cells = self.state.addr_cells,
+                            .size_cells = self.state.size_cells,
                             .len = len,
                         };
                     }
@@ -241,23 +271,22 @@ const Parser = struct {
         return b;
     }
 
-    /// Consume the current token and return it as `u32`.
-    fn consumeU32(self: *Parser) DtbError!u32 {
-        const token = try self.consumeToken();
+    /// Peek the current chunk and return it as `u32`.
+    fn peekU32(self: *Parser) DtbError!u32 {
+        const token = try self.peekChunk();
         return bits.fromBigEndian(@as(*const u32, @ptrCast(@alignCast(&token))).*);
     }
 
-    /// Consume the current token and return it.
-    fn consumeToken(self: *Parser) DtbError!Chunk {
-        const tok = try self.peekToken();
-        self.ptr += token_align;
-        return tok;
+    /// Consume the current chunk and return it as `u32`.
+    fn consumeU32(self: *Parser) DtbError!u32 {
+        const token = try self.consumeChunk();
+        return bits.fromBigEndian(@as(*const u32, @ptrCast(@alignCast(&token))).*);
     }
 
     /// Read the next 4 bytes.
     ///
     /// Pointer is not advanced.
-    fn peekToken(self: *Parser) DtbError!Chunk {
+    fn peekChunk(self: *Parser) DtbError!Chunk {
         if (self.ptr >= self.header.structAddr() + self.header.structSize()) {
             return DtbError.UnexpectedEof;
         } else {
@@ -265,10 +294,29 @@ const Parser = struct {
         }
     }
 
+    /// Consume the current chunk and return it.
+    fn consumeChunk(self: *Parser) DtbError!Chunk {
+        const tok = try self.peekChunk();
+        self.ptr += token_align;
+        return tok;
+    }
+
+    /// Consume a null-terminated string and return it.
+    fn consumeString(self: *Parser) DtbError![]const u8 {
+        const ptr: [*:0]const u8 = @ptrFromInt(self.ptr);
+        const len = std.mem.len(ptr);
+
+        if (self.ptr + len + 1 > self.header.structAddr() + self.header.structSize()) {
+            return DtbError.UnexpectedEof;
+        }
+        self.ptr += len + 1;
+        return ptr[0..len];
+    }
+
     /// Skip tokens until a non-nop token is found.
     fn consumeNop(self: *Parser) DtbError!void {
         try self.consumePadding();
-        while (Token.eql(.nop, try self.peekToken())) : (self.ptr += token_align) {}
+        while (Token.eql(.nop, try self.peekChunk())) : (self.ptr += token_align) {}
     }
 
     /// Discard bytes to the next alignment boundary.
@@ -459,7 +507,7 @@ test "Parser.nop" {
     var parser = Parser.new(dtb.header, null);
 
     try parser.consumeNop();
-    try testing.expectEqual([_]u8{ 0x00, 0x00, 0x00, 0x01 }, try parser.peekToken());
+    try testing.expectEqual([_]u8{ 0x00, 0x00, 0x00, 0x01 }, try parser.peekChunk());
 }
 
 test "Parser.reg" {
@@ -497,7 +545,10 @@ test "Parser.reg" {
     const dtb = try Dtb.new(@intFromPtr(bin.ptr));
 
     // Find "fugaga" node.
-    const node = try dtb.searchNode("fugaga", null);
+    const node = try dtb.searchNode(
+        .{ .compat = "fugaga" },
+        null,
+    );
     try testing.expectEqual(Node{
         .addr = @intFromPtr(bin.ptr) + @sizeOf(FdtHeader) + 12,
         .addr_cells = 2,
