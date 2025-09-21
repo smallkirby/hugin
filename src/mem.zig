@@ -1,3 +1,25 @@
+/// Errors.
+pub const MemError = error{
+    /// Out of memory.
+    OutOfMemory,
+    /// Virtual memory allocation failed.
+    OutOfVirtualMemory,
+    /// The specified region is invalid.
+    InvalidRegion,
+};
+
+pub const PageAllocator = @import("mem/PageAllocator.zig");
+
+/// Physical address.
+pub const Phys = u64;
+/// Virtual address.
+pub const Virt = u64;
+/// Physical memory region.
+pub const PhysRegion = struct {
+    addr: Phys,
+    size: usize,
+};
+
 /// KiB in bytes.
 pub const kib = 1024;
 /// MiB in bytes.
@@ -30,3 +52,50 @@ pub const page_mask_4kib: u64 = size_4kib - 1;
 pub const page_mask_2mib: u64 = size_2mib - 1;
 /// Mask for a 1G page.
 pub const page_mask_1gib: u64 = size_1gib - 1;
+
+/// One and only instance of the buddy allocator.
+var buddy_allocator_instance = BuddyAllocator.new();
+const BuddyAllocator = @import("mem/BuddyAllocator.zig");
+
+/// Initialize allocators
+pub fn initAllocators(avail: PhysRegion, reserveds: []PhysRegion, log_fn: hugin.klog.LogFn) MemError!void {
+    buddy_allocator_instance.init(avail, reserveds, log_fn);
+}
+
+/// Translate the given virtual address to physical address.
+///
+/// This function just use simple calculation and does not walk page tables.
+/// To do page table walk, use arch-specific functions.
+pub fn virt2phys(addr: anytype) Phys {
+    const value = switch (@typeInfo(@TypeOf(addr))) {
+        .int, .comptime_int => @as(u64, addr),
+        .pointer => |p| switch (p.size) {
+            .one, .many => @as(u64, @intFromPtr(addr)),
+            .slice => @as(u64, @intFromPtr(addr.ptr)),
+            else => @panic("virt2phys: invalid type"),
+        },
+        else => @compileError("virt2phys: invalid type"),
+    };
+
+    return value;
+}
+
+/// Translate the given physical address to virtual address.
+///
+/// This function just use simple calculation and does not walk page tables.
+/// To do page table walk, use arch-specific functions.
+pub fn phys2virt(addr: anytype) Virt {
+    const value = switch (@typeInfo(@TypeOf(addr))) {
+        .int, .comptime_int => @as(u64, addr),
+        .pointer => @as(u64, @intFromPtr(addr)),
+        else => @compileError("phys2virt: invalid type"),
+    };
+
+    return value;
+}
+
+// =============================================================
+// Imports
+// =============================================================
+
+const hugin = @import("hugin");

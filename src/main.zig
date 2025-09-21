@@ -89,6 +89,8 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8) !void {
         };
         hugin.arch.am.msr(.spsr_el2, spsr_el2);
         hugin.arch.am.msr(.elr_el2, elr_el2);
+
+        log.info("Switching to EL1h...", .{});
         hugin.arch.am.eret();
     }
 
@@ -105,8 +107,12 @@ export fn el1Main() callconv(.c) noreturn {
 }
 
 fn setupMemory(dtb: hugin.dtb.Dtb, elf: usize, sp: usize) !void {
+    const max_num_reserveds = 16;
+    var reserveds: [max_num_reserveds]hugin.mem.PhysRegion = undefined;
+    var num_reserveds: usize = 0;
+
     // Get available memory region from DTB.
-    {
+    const avail: hugin.mem.PhysRegion = blk: {
         const memory_node = try dtb.searchNode(
             .{ .name = "memory" },
             null,
@@ -122,7 +128,12 @@ fn setupMemory(dtb: hugin.dtb.Dtb, elf: usize, sp: usize) !void {
             memory_reg.addr,
             memory_reg.addr + memory_reg.size,
         });
-    }
+
+        break :blk .{
+            .addr = memory_reg.addr,
+            .size = memory_reg.size,
+        };
+    };
 
     // Get DTB region.
     {
@@ -130,6 +141,12 @@ fn setupMemory(dtb: hugin.dtb.Dtb, elf: usize, sp: usize) !void {
             dtb.address(),
             dtb.address() + dtb.getSize(),
         });
+
+        reserveds[num_reserveds] = .{
+            .addr = dtb.address(),
+            .size = dtb.getSize(),
+        };
+        num_reserveds += 1;
     }
 
     // Get kernel region.
@@ -147,6 +164,12 @@ fn setupMemory(dtb: hugin.dtb.Dtb, elf: usize, sp: usize) !void {
                 phdr.p_paddr,
                 phdr.p_paddr + phdr.p_memsz,
             });
+
+            reserveds[num_reserveds] = .{
+                .addr = phdr.p_paddr,
+                .size = phdr.p_memsz,
+            };
+            num_reserveds += 1;
         }
     }
 
@@ -158,7 +181,22 @@ fn setupMemory(dtb: hugin.dtb.Dtb, elf: usize, sp: usize) !void {
             stack_top,
             stack_bottom,
         });
+
+        reserveds[num_reserveds] = .{
+            .addr = stack_top,
+            .size = stack_size,
+        };
+        num_reserveds += 1;
     }
+
+    hugin.rtt.expect(num_reserveds <= max_num_reserveds);
+
+    // Init allocators.
+    try hugin.mem.initAllocators(
+        avail,
+        reserveds[0..num_reserveds],
+        log.info,
+    );
 }
 
 // =============================================================

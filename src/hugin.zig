@@ -7,6 +7,9 @@ pub const mem = @import("mem.zig");
 pub const rtt = @import("rtt.zig");
 pub const serial = @import("serial.zig");
 
+pub const LogFn = klog.LogFn;
+pub const SpinLock = @import("SpinLock.zig");
+
 /// Whether the module is built with runtime tests enabled.
 pub const is_runtime_test = options.is_runtime_test;
 /// Git SHA of Hugin kernel.
