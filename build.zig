@@ -175,6 +175,40 @@ pub fn build(b: *std.Build) !void {
     run_qemu.dependOn(&qemu_cmd.step);
 
     // =============================================================
+    // Devicetree
+    // =============================================================
+
+    const dump_dts = b.addSystemCommand(&[_][]const u8{
+        qemu_bin,
+        "-M",
+        b.fmt("virt,gic-version=3,secure=off,virtualization=on,dumpdtb={s}/qemu.dtb", .{b.install_path}),
+        "-m",
+        "1G",
+        "-bios",
+        b.fmt("{s}/u-boot.bin", .{uboot_dir}),
+        "-cpu",
+        "cortex-a53",
+        "-drive",
+        b.fmt("file=fat:rw:{s}/{s},format=raw,if=none,media=disk,id=disk", .{ b.install_path, out_dir_name }),
+        "-smp",
+        "3",
+    });
+    const decompile_dts = b.addSystemCommand(&[_][]const u8{
+        "dtc",
+        "-I",
+        "dtb",
+        "-O",
+        "dts",
+        "-o",
+        b.fmt("{s}/qemu.dts", .{b.install_path}),
+        b.fmt("{s}/qemu.dtb", .{b.install_path}),
+    });
+    decompile_dts.step.dependOn(&dump_dts.step);
+
+    const extract_dts = b.step("dts", "Extract QEMU devicetree");
+    extract_dts.dependOn(&decompile_dts.step);
+
+    // =============================================================
     // Unit tests
     // =============================================================
 
