@@ -97,6 +97,16 @@ pub const Dtb = struct {
         }
         return false;
     }
+
+    /// Get the total size of the DTB in bytes.
+    pub fn getSize(self: Dtb) usize {
+        return bits.fromBigEndian(self.header.total_size);
+    }
+
+    /// Get the address of the DTB.
+    pub fn address(self: Dtb) usize {
+        return @intFromPtr(self.header);
+    }
 };
 
 const Parser = struct {

@@ -7,6 +7,9 @@ pub const std_options = std.Options{
 /// Override the panic function.
 pub const panic = @import("panic.zig").panic_fn;
 
+/// Size of kernel stack in bytes.
+const stack_size = 16 * hugin.mem.size_4kib;
+
 /// Kernel entry point.
 export fn main(argc: usize, argv: [*]const [*:0]const u8) callconv(.c) usize {
     kernelMain(argc, argv) catch |err| {
@@ -18,7 +21,9 @@ export fn main(argc: usize, argv: [*]const [*:0]const u8) callconv(.c) usize {
 }
 
 fn kernelMain(argc: usize, argv: [*]const [*:0]const u8) !void {
-    if (argc != 1) {
+    const sp = hugin.arch.getSp();
+
+    if (argc != 2) {
         return error.InvalidArgumentCount;
     }
 
@@ -59,21 +64,10 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8) !void {
 
     // Setup memory.
     {
-        const memory_node = try dtb.searchNode(
-            .{ .name = "memory" },
-            null,
-        ) orelse {
-            log.err("Failed to find memory node from DTB", .{});
-            return error.SearchMemoryNode;
-        };
-        const memory_reg = try dtb.readRegProp(memory_node, 0) orelse {
-            log.err("Failed to read reg property of memory node", .{});
-            return error.NoRegProperty;
-        };
-        log.info("Memory available @ 0x{X:0>16} - 0x{X:0>16}", .{
-            memory_reg.addr,
-            memory_reg.addr + memory_reg.size,
-        });
+        const arg1 = argv[1];
+        const elf_addr_str = arg1[0..std.mem.len(arg1)];
+        const elf_addr = try std.fmt.parseInt(usize, elf_addr_str, 0);
+        try setupMemory(dtb, elf_addr, sp);
     }
 
     // Setup hypervisor configuration.
@@ -110,10 +104,68 @@ export fn el1Main() callconv(.c) noreturn {
     }
 }
 
+fn setupMemory(dtb: hugin.dtb.Dtb, elf: usize, sp: usize) !void {
+    // Get available memory region from DTB.
+    {
+        const memory_node = try dtb.searchNode(
+            .{ .name = "memory" },
+            null,
+        ) orelse {
+            log.err("Failed to find memory node from DTB", .{});
+            return error.SearchMemoryNode;
+        };
+        const memory_reg = try dtb.readRegProp(memory_node, 0) orelse {
+            log.err("Failed to read reg property of memory node", .{});
+            return error.NoRegProperty;
+        };
+        log.info("Memory @ 0x{X:0>16} - 0x{X:0>16}", .{
+            memory_reg.addr,
+            memory_reg.addr + memory_reg.size,
+        });
+    }
+
+    // Get DTB region.
+    {
+        log.info("DTB    @ 0x{X:0>16} - 0x{X:0>16}", .{
+            dtb.address(),
+            dtb.address() + dtb.getSize(),
+        });
+    }
+
+    // Get kernel region.
+    {
+        log.info("Hugin kernel image:", .{});
+
+        const elf_ptr: [*]const u8 = @ptrFromInt(elf);
+        const ehdr: *const std.elf.Elf64_Ehdr = @ptrFromInt(elf);
+        const hdr = std.elf.Header.init(ehdr.*, builtin.cpu.arch.endian());
+
+        var iter = hdr.iterateProgramHeadersBuffer(elf_ptr[0..std.math.maxInt(usize)]);
+        while (try iter.next()) |phdr| {
+            if (phdr.p_type != std.elf.PT_LOAD) continue;
+            log.info("\t @ 0x{X:0>16} - 0x{X:0>16}", .{
+                phdr.p_paddr,
+                phdr.p_paddr + phdr.p_memsz,
+            });
+        }
+    }
+
+    // Get stack.
+    {
+        const stack_bottom = hugin.bits.roundup(sp, hugin.mem.page_size);
+        const stack_top = stack_bottom - stack_size;
+        log.info("Stack  @ 0x{X:0>16} - 0x{X:0>16}", .{
+            stack_top,
+            stack_bottom,
+        });
+    }
+}
+
 // =============================================================
 // Imports
 // =============================================================
 
 const std = @import("std");
 const log = std.log.scoped(.main);
+const builtin = @import("builtin");
 const hugin = @import("hugin");

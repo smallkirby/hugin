@@ -10,3 +10,11 @@ pub fn halt() void {
 pub fn getCurrentEl() u2 {
     return am.mrs(.current_el).el;
 }
+
+/// Get the current SP.
+pub inline fn getSp() usize {
+    return asm volatile (
+        \\mov %[sp], sp
+        : [sp] "=r" (-> usize),
+    );
+}

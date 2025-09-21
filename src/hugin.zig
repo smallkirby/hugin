@@ -3,6 +3,7 @@ pub const bits = @import("bits.zig");
 pub const drivers = @import("drivers.zig");
 pub const dtb = @import("dtb.zig");
 pub const klog = @import("klog.zig");
+pub const mem = @import("mem.zig");
 pub const rtt = @import("rtt.zig");
 pub const serial = @import("serial.zig");
 
