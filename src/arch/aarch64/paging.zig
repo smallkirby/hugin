@@ -23,8 +23,8 @@ pub fn initS2Table(allocator: PageAllocator) PagingError!void {
     // Set VTCR_EL2 and VTTBR_EL2.
     const sl0: u2 = if (initial_level == 1) 0b01 else 0b10;
     const vtcr_el2 = std.mem.zeroInit(regs.VtcrEl2, .{
-        .ps = @as(u3, @intCast(@intFromEnum(parange))), // Use PA size as Stage IPA size.
-        .tg0 = .size_4kib, // 4K
+        .ps = @as(u3, @intCast(@intFromEnum(parange))), // Use PA size as IPA size.
+        .tg0 = .size_4kib,
         .sh0 = .inner,
         .orgn0 = .wbranwac,
         .irgn0 = .wbranwac,
