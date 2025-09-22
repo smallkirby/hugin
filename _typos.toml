@@ -6,3 +6,6 @@ ists = "ists"
 dne = "dne"
 # ba: acronym for BinAllocator.
 ba = "ba"
+# PnCH: Privilege level n's Configuration register for Hypervisor.
+pn = "pn"
+pnch = "pnch"

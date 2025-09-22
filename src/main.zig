@@ -79,6 +79,11 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8) !void {
         hugin.arch.am.msr(.hcr_el2, hcr_el2);
     }
 
+    // Initialize paging.
+    {
+        try hugin.arch.initPaging(hugin.mem.page_allocator);
+    }
+
     // Jump to EL1h.
     {
         const spsr_el2 = std.mem.zeroInit(hugin.arch.regs.Spsr, .{

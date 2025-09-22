@@ -1,5 +1,12 @@
+pub const Error = paging.PagingError;
+
 pub const am = @import("asm.zig"); // TODO: should not be exported.
 pub const regs = @import("registers.zig"); // TODO: should not be exported.
+
+/// Initialize paging.
+pub fn initPaging(pallocator: PageAllocator) Error!void {
+    try paging.initS2Table(pallocator);
+}
 
 /// Halt until interrupt.
 pub fn halt() void {
@@ -18,3 +25,12 @@ pub inline fn getSp() usize {
         : [sp] "=r" (-> usize),
     );
 }
+
+// =============================================================
+// Imports
+// =============================================================
+
+const hugin = @import("hugin");
+const PageAllocator = hugin.mem.PageAllocator;
+
+const paging = @import("paging.zig");
