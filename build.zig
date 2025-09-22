@@ -34,9 +34,14 @@ fn getGitSha(b: *std.Build) ![]const u8 {
 }
 
 pub fn build(b: *std.Build) !void {
+    const Feature = std.Target.aarch64.Feature;
     const target = b.resolveTargetQuery(.{
         .cpu_arch = .aarch64,
+        .abi = .none,
         .os_tag = .freestanding,
+        .cpu_features_add = std.Target.aarch64.featureSet(&[_]Feature{
+            .v8a,
+        }),
         .ofmt = .elf,
     });
     const optimize = b.standardOptimizeOption(.{});
