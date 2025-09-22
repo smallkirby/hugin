@@ -1,6 +1,6 @@
 /// System registers.
 pub const SystemReg = enum {
-    current_el,
+    currentel,
     elr_el1,
     elr_el2,
     elr_el3,
@@ -14,25 +14,13 @@ pub const SystemReg = enum {
 
     /// Get the string representation of the system register.
     pub fn str(comptime self: SystemReg) []const u8 {
-        return switch (self) {
-            .current_el => "currentel",
-            .elr_el1 => "elr_el1",
-            .elr_el2 => "elr_el2",
-            .elr_el3 => "elr_el3",
-            .spsr_el1 => "spsr_el1",
-            .spsr_el2 => "spsr_el2",
-            .spsr_el3 => "spsr_el3",
-            .hcr_el2 => "hcr_el2",
-            .id_aa64mmfr0_el1 => "id_aa64mmfr0_el1",
-            .vtcr_el2 => "vtcr_el2",
-            .vttbr_el2 => "vttbr_el2",
-        };
+        return @tagName(self);
     }
 
     /// Get the type of the system register.
     pub fn Type(comptime self: SystemReg) type {
         return switch (self) {
-            .current_el => CurrentEl,
+            .currentel => CurrentEl,
             .elr_el1, .elr_el2, .elr_el3 => Elr,
             .spsr_el1, .spsr_el2, .spsr_el3 => Spsr,
             .hcr_el2 => HcrEl2,

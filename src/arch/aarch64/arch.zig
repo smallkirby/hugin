@@ -15,7 +15,7 @@ pub fn halt() void {
 
 /// Get the current exception level.
 pub fn getCurrentEl() u2 {
-    return am.mrs(.current_el).el;
+    return am.mrs(.currentel).el;
 }
 
 /// Get the current SP.
