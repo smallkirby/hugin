@@ -4,8 +4,9 @@ pub const am = @import("asm.zig"); // TODO: should not be exported.
 pub const regs = @import("registers.zig"); // TODO: should not be exported.
 
 /// Initialize paging.
-pub fn initPaging(pallocator: PageAllocator) Error!void {
+pub fn initPaging(ipa: usize, pa: usize, size: usize, pallocator: PageAllocator) Error!void {
     try paging.initS2Table(pallocator);
+    try paging.mapS2(ipa, pa, size, pallocator);
 }
 
 /// Halt until interrupt.

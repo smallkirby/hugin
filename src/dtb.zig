@@ -47,7 +47,7 @@ pub const Dtb = struct {
     /// Search for a node with the given compatible string.
     ///
     /// If `current` is not `null`, search starts from the given node.
-    pub fn searchNode(self: *const Dtb, option: SearchOption, current: ?Node) DtbError!?Node {
+    pub fn searchNode(self: Dtb, option: SearchOption, current: ?Node) DtbError!?Node {
         var parser = Parser.new(self.header, current);
 
         while (!parser.isEmpty()) {
@@ -58,7 +58,7 @@ pub const Dtb = struct {
     }
 
     /// Read the register value at the given index from the `reg` property of the node.
-    pub fn readRegProp(self: *const Dtb, node: Node, index: usize) DtbError!?Reg {
+    pub fn readRegProp(self: Dtb, node: Node, index: usize) DtbError!?Reg {
         var parser = Parser.new(self.header, node);
         const reg = try parser.getProp("reg") orelse return null;
 

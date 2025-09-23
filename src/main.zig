@@ -12,7 +12,8 @@ const stack_size = 16 * hugin.mem.size_4kib;
 
 /// Kernel entry point.
 export fn main(argc: usize, argv: [*]const [*:0]const u8) callconv(.c) usize {
-    kernelMain(argc, argv) catch |err| {
+    const sp = hugin.arch.getSp();
+    kernelMain(argc, argv, sp) catch |err| {
         log.err("Kernel aborted with error: {t}", .{err});
         return @intFromError(err);
     };
@@ -20,9 +21,7 @@ export fn main(argc: usize, argv: [*]const [*:0]const u8) callconv(.c) usize {
     return 0;
 }
 
-fn kernelMain(argc: usize, argv: [*]const [*:0]const u8) !void {
-    const sp = hugin.arch.getSp();
-
+fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
     if (argc != 2) {
         return error.InvalidArgumentCount;
     }
@@ -70,18 +69,30 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8) !void {
         try setupMemory(dtb, elf_addr, sp);
     }
 
+    // Initialize paging.
+    {
+        const memory = try getAvailMemory(dtb);
+        log.debug("Mapping IPA to PA: 0x{X} -> 0x{X} (size: 0x{X})", .{
+            memory.addr,
+            memory.addr,
+            memory.size,
+        });
+        try hugin.arch.initPaging(
+            memory.addr,
+            memory.addr,
+            memory.size,
+            hugin.mem.page_allocator,
+        );
+    }
+
     // Setup hypervisor configuration.
     {
         const hcr_el2 = std.mem.zeroInit(hugin.arch.regs.HcrEl2, .{
             .rw = true, // Aarch64
             .api = true, // Disable PAuth.
+            .vm = true,
         });
         hugin.arch.am.msr(.hcr_el2, hcr_el2);
-    }
-
-    // Initialize paging.
-    {
-        try hugin.arch.initPaging(hugin.mem.page_allocator);
     }
 
     // Jump to EL1h.
@@ -105,9 +116,9 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8) !void {
     }
 }
 
-export fn el1Main() callconv(.c) noreturn {
+export fn el1Main() callconv(.naked) noreturn {
     while (true) {
-        hugin.arch.halt();
+        asm volatile ("wfi");
     }
 }
 
@@ -118,26 +129,13 @@ fn setupMemory(dtb: hugin.dtb.Dtb, elf: usize, sp: usize) !void {
 
     // Get available memory region from DTB.
     const avail: hugin.mem.PhysRegion = blk: {
-        const memory_node = try dtb.searchNode(
-            .{ .name = "memory" },
-            null,
-        ) orelse {
-            log.err("Failed to find memory node from DTB", .{});
-            return error.SearchMemoryNode;
-        };
-        const memory_reg = try dtb.readRegProp(memory_node, 0) orelse {
-            log.err("Failed to read reg property of memory node", .{});
-            return error.NoRegProperty;
-        };
+        const region = try getAvailMemory(dtb);
         log.info("Memory @ 0x{X:0>16} - 0x{X:0>16}", .{
-            memory_reg.addr,
-            memory_reg.addr + memory_reg.size,
+            region.addr,
+            region.addr + region.size,
         });
 
-        break :blk .{
-            .addr = memory_reg.addr,
-            .size = memory_reg.size,
-        };
+        break :blk region;
     };
 
     // Get DTB region.
@@ -202,6 +200,23 @@ fn setupMemory(dtb: hugin.dtb.Dtb, elf: usize, sp: usize) !void {
         reserveds[0..num_reserveds],
         log.info,
     );
+}
+
+fn getAvailMemory(dtb: hugin.dtb.Dtb) !hugin.mem.PhysRegion {
+    const memory_node = try dtb.searchNode(
+        .{ .name = "memory" },
+        null,
+    ) orelse {
+        return error.SearchMemoryNode;
+    };
+    const memory_reg = try dtb.readRegProp(memory_node, 0) orelse {
+        return error.NoRegProperty;
+    };
+
+    return .{
+        .addr = memory_reg.addr,
+        .size = memory_reg.size,
+    };
 }
 
 // =============================================================

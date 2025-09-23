@@ -1,4 +1,4 @@
-//! VSMAv8-64 translation system.
+//! VSMAv8-64 translation system for Stage 2 translation.
 
 pub const PagingError = hugin.mem.MemError;
 
@@ -38,8 +38,133 @@ pub fn initS2Table(allocator: PageAllocator) PagingError!void {
         .vmid = 0,
     };
     am.msr(.vttbr_el2, vttbr);
-    std.log.debug("VTTBR_EL2: 0x{X:0>16}", .{@as(u64, @bitCast(vttbr))});
+    log.debug(
+        "VTTBR_EL2: 0x{X:0>16} (level={d})",
+        .{ @as(u64, @bitCast(vttbr)), initial_level },
+    );
 }
+
+/// Map the given IPA `[pa, pa + size)` to PA `[ipa, ipa + size)`.
+pub fn mapS2(ipa: usize, pa: usize, size: usize, pallocator: PageAllocator) PagingError!void {
+    hugin.rtt.expectEqual(0, pa % mem.size_4kib);
+    hugin.rtt.expectEqual(0, ipa % mem.size_4kib);
+    hugin.rtt.expectEqual(0, size % mem.size_4kib);
+
+    const vttbr = am.mrs(.vttbr_el2);
+    const vctr = am.mrs(.vtcr_el2);
+
+    const sl0 = vctr.sl0;
+    const t0sz = vctr.t0sz;
+    const initial_level: LookupLevel = switch (sl0) {
+        0b00 => 2,
+        0b01 => 1,
+        0b10 => 0,
+        0b11 => 3,
+    };
+    const num_descs = numConcatenatedTables(t0sz, initial_level);
+
+    var state = TransState{
+        .allocator = pallocator,
+        .pa = pa,
+        .ipa = ipa,
+        .remain = size,
+        .perm = .rw,
+    };
+    try mapS2Recursive(
+        &state,
+        initial_level,
+        vttbr.baddr,
+        num_descs,
+    );
+
+    asm volatile (
+        \\dsb ishst
+        \\tlbi alle1is
+    );
+}
+
+/// Recursively map the given IPA to PA.
+///
+/// This function maps pages using Block descriptors whenever possible.
+fn mapS2Recursive(state: *TransState, level: LookupLevel, tbl: usize, num_descs: usize) PagingError!void {
+    const shift: u6 = @intCast(mem.page_shift_4kib + (max_level - level) * indexable_bits);
+    const index = (state.ipa >> shift) & (num_descs - 1);
+    const table = @as([*]u64, @ptrFromInt(tbl))[0..num_descs];
+
+    // Map pages using Page descriptors.
+    if (level == max_level) {
+        for (table[index..]) |*desc| {
+            var pdesc = std.mem.zeroInit(PageDescriptor, .{
+                .page = true,
+                .valid = true,
+            });
+            pdesc.lattr.s2ap = state.perm;
+            pdesc.lattr.memattr = 0b1111; // Normal memory, Write-Back Read-Allocate Write-Allocate Cacheable.
+            pdesc.lattr.sh = .inner;
+            pdesc.setOa(state.pa);
+
+            desc.* = @bitCast(pdesc);
+
+            state.ipa += mem.size_4kib;
+            state.pa += mem.size_4kib;
+            state.remain -= mem.size_4kib;
+
+            if (state.remain == 0) return;
+        }
+
+        return;
+    }
+
+    for (table[index..]) |*desc| {
+        const block_size = @as(usize, 1) << shift;
+
+        // Map using Block descriptor if possible.
+        if (canUseBlock(level, state.remain, state.pa, state.ipa, block_size)) {
+            var bdesc = std.mem.zeroInit(PageDescriptor, .{
+                .page = false,
+                .valid = true,
+            });
+            bdesc.lattr.s2ap = state.perm;
+            bdesc.lattr.memattr = 0b1111; // Normal memory, Write-Back Read-Allocate Write-Allocate Cacheable.
+            bdesc.lattr.sh = .inner;
+            bdesc.setOa(state.pa);
+
+            desc.* = @bitCast(bdesc);
+
+            state.ipa += block_size;
+            state.pa += block_size;
+            state.remain -= block_size;
+
+            if (state.remain == 0) continue;
+        }
+
+        // Map next level table.
+        const tdesc: *TableDescriptor = @ptrCast(desc);
+        if (!(tdesc.valid and tdesc.table)) {
+            const next = try state.allocator.allocPages(1);
+            @memset(next, 0);
+
+            tdesc.table = true;
+            tdesc.setNlta(@intFromPtr(next.ptr));
+            tdesc.valid = true;
+        }
+
+        // Recursively map next level table.
+        const nlta = tdesc.getNlta();
+        try mapS2Recursive(state, level + 1, nlta, 512);
+
+        if (state.remain == 0) return;
+    }
+}
+
+/// State for recursive table walk to map Stage 2 translation table.
+const TransState = struct {
+    allocator: PageAllocator,
+    pa: usize,
+    ipa: usize,
+    remain: usize,
+    perm: S2ap,
+};
 
 /// Get the number of required concatenated translation tables.
 ///
@@ -47,7 +172,6 @@ pub fn initS2Table(allocator: PageAllocator) PagingError!void {
 /// - `level`: Initial lookup level (0-3).
 fn numConcatenatedTables(t0sz: u8, level: LookupLevel) usize {
     const index_width = 9; // Number of entries per table.
-    const max_level = 3;
     const offset_width = 12; // Width in bits of offset within a page.
     const va_bits: u64 = 64 - t0sz; // VA size in bits.
     const levels: u64 = @intCast(max_level - level); // Number of levels to walk.
@@ -61,10 +185,23 @@ fn numConcatenatedTables(t0sz: u8, level: LookupLevel) usize {
     }
 }
 
+/// Check if the given IPA to PA mapping can be done using a Block descriptor.
+fn canUseBlock(level: LookupLevel, remain: usize, pa: usize, ipa: usize, bsize: usize) bool {
+    const mask = bsize - 1;
+    return (level >= 2) and
+        (remain >= bsize) and
+        (pa % mask == 0) and
+        (ipa % mask == 0);
+}
+
 /// Size in bits of IA (Input Address).
 const ia_size = 48;
 /// Size in bits of OA (Output Address).
 const oa_size = 48;
+/// Number of bits that are used to index into a table.
+const indexable_bits = 9;
+/// Max level of translation table.
+const max_level = 3;
 
 /// Lookup level.
 const LookupLevel = i8;
@@ -97,6 +234,14 @@ const TableDescriptor = packed struct(u64) {
     _ignored6: u6 = 0,
     /// Attributes (not used by Hugin).
     attributes: u5 = 0,
+
+    pub fn setNlta(self: *TableDescriptor, nlta: usize) void {
+        self.nlta = @intCast(nlta >> mem.page_shift_4kib);
+    }
+
+    pub fn getNlta(self: *const TableDescriptor) usize {
+        return @as(usize, self.nlta) << mem.page_shift_4kib;
+    }
 };
 
 /// Page or Block descriptor for Stage 2 translation.
@@ -107,8 +252,6 @@ const PageDescriptor = packed struct(u64) {
     page: bool,
     /// Lower attributes.
     lattr: LowerAttr,
-    /// Reserved when FEAT_XS is not implemented.
-    _reserved0: u1 = 0,
     /// Output address.
     oa: u36,
     /// Reserved when OA is 48 bits.
@@ -117,6 +260,10 @@ const PageDescriptor = packed struct(u64) {
     _reserved2: u1 = 0,
     /// Upper attributes.
     uattr: UpperAttr,
+
+    pub fn setOa(self: *PageDescriptor, oa: usize) void {
+        self.oa = @intCast(oa >> mem.page_shift_4kib);
+    }
 };
 
 /// Lower attributes for Stage 2 page descriptor.
@@ -187,7 +334,8 @@ const S2ap = enum(u2) {
 const std = @import("std");
 const log = std.log.scoped(.paging);
 const hugin = @import("hugin");
+const mem = hugin.mem;
 const am = @import("asm.zig");
 const regs = @import("registers.zig");
 
-const PageAllocator = hugin.mem.PageAllocator;
+const PageAllocator = mem.PageAllocator;
