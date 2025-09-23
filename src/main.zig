@@ -122,6 +122,23 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
 }
 
 export fn el1Main() callconv(.naked) noreturn {
+    // Terminate QEMU for runtime test.
+    // We can't call `hugin.terminateQemu()` in the naked function.
+    if (hugin.is_runtime_test) {
+        asm volatile (
+            \\adrp x16, .Lhandle
+            \\add x16, x16, :lo12:.Lhandle
+            \\
+            \\mov x0, #0x18
+            \\mov x1, x16
+            \\hlt #0xF000
+            \\
+            \\.Lhandle:
+            \\.quad 0x20026
+            \\.quad 0x0
+        );
+    }
+
     while (true) {
         asm volatile ("wfi");
     }

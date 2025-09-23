@@ -27,7 +27,7 @@ pub const mib = 1024 * kib;
 /// GiB in bytes.
 pub const gib = 1024 * mib;
 
-/// Size of a single page in bytes in Norn kernel.
+/// Size of a single page in bytes in Hugin kernel.
 pub const page_size: u64 = size_4kib;
 /// Number of bits to shift to extract the PFN from physical address.
 pub const page_shift: u64 = page_shift_4kib;

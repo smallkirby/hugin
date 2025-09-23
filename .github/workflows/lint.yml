@@ -1,0 +1,34 @@
+name: Lint
+
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+    branches:
+      - master
+
+env:
+  ZIG_VERSION: 0.15.1
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install zig
+        run: |
+          curl https://ziglang.org/download/${{env.ZIG_VERSION}}/zig-x86_64-linux-${{env.ZIG_VERSION}}.tar.xz -L -o zig.tar.xz
+          tar -xf zig.tar.xz
+          echo "$(pwd)/zig-x86_64-linux-${{env.ZIG_VERSION}}" >> $GITHUB_PATH
+
+      - name: Lint Zig
+        run: |
+          zig fmt --check **/*.zig --exclude .zig-cache/**/*.zig
+
+      ## - name: Spell Check
+      ##   uses: crate-ci/typos@v1.29.5
+      ##   with:
+      ##     files: .github/** scripts/** src/** *.zig *.zig.zon *.md
+      ##     config: _typos.toml

@@ -2,6 +2,10 @@
 
 ![Zig](https://shields.io/badge/Zig-v0%2E15%2E1-blue?logo=zig&color=F7A41D&style=for-the-badge)
 
+![Lint](https://github.com/smallkirby/hugin/actions/workflows/lint.yml/badge.svg)
+![Unit Tests](https://github.com/smallkirby/hugin/actions/workflows/unittest.yml/badge.svg)
+![Runtime Tests](https://github.com/smallkirby/hugin/actions/workflows/rtt.yml/badge.svg)
+
 ## Development
 
 ```bash
