@@ -26,7 +26,7 @@ export fn syncHandler(ctx: *Context) callconv(.c) void {
     const lr = am.mrs(.elr_el2);
     const sr = am.mrs(.esr_el2);
     log.err(
-        "!!!! Synchronous exception: ELR=0x{X}, ESR={X:0>16}",
+        "!!! Synchronous exception: ELR=0x{X}, ESR={X:0>16}",
         .{ lr.addr, @as(u64, @bitCast(sr)) },
     );
 
@@ -38,6 +38,13 @@ export fn syncHandler(ctx: *Context) callconv(.c) void {
             const hcr_el2 = am.mrs(.hcr_el2);
             log.err("Instruction abort: {t}", .{ifsc});
             log.err("FAR=0x{X}, HCR=0x{X:0>16}", .{ far.addr, @as(u64, @bitCast(hcr_el2)) });
+
+            if (paging.lookup(far.addr)) |pa| {
+                log.err("IPA 0x{X:0>16} -> PA 0x{X:0>16}", .{ far.addr, pa });
+            } else {
+                log.err("IPA 0x{X:0>16} -> (not mapped)", .{far.addr});
+            }
+
             @panic("Abort.");
         },
 
@@ -95,4 +102,5 @@ const std = @import("std");
 const log = std.log.scoped(.isr);
 
 const am = @import("asm.zig");
+const paging = @import("paging.zig");
 const regs = @import("registers.zig");

@@ -83,6 +83,59 @@ pub fn mapS2(ipa: usize, pa: usize, size: usize, pallocator: PageAllocator) Pagi
     );
 }
 
+/// Page walk to lookup the given IPA.
+pub fn lookup(ipa: usize) ?usize {
+    const vttbr = am.mrs(.vttbr_el2);
+    const vctr = am.mrs(.vtcr_el2);
+    const sl0 = vctr.sl0;
+    const initial_level: LookupLevel = switch (sl0) {
+        0b00 => 2,
+        0b01 => 1,
+        0b10 => 0,
+        0b11 => 3,
+    };
+
+    return lookupRecursive(ipa, initial_level, vttbr.baddr);
+}
+
+fn lookupRecursive(ipa: usize, level: LookupLevel, tbl: usize) ?usize {
+    const shift: u6 = @intCast(mem.page_shift_4kib + (max_level - level) * indexable_bits);
+    const index = (ipa >> shift) & 0x1ff;
+    const table = @as([*]u64, @ptrFromInt(tbl))[0..512];
+    const desc = table[index];
+
+    // Block descriptor.
+    blk: {
+        const bdesc: PageDescriptor = @bitCast(desc);
+        if (!bdesc.valid or bdesc.page) break :blk;
+        if (level == max_level) break :blk;
+
+        const bsize = @as(usize, 1) << shift;
+        return bdesc.getOa() | (ipa & (bsize - 1));
+    }
+
+    // Table descriptor.
+    blk: {
+        const tdesc: TableDescriptor = @bitCast(desc);
+        if (!tdesc.valid or !tdesc.table) break :blk;
+        if (level == max_level) break :blk;
+
+        const nlta = tdesc.getNlta();
+        return lookupRecursive(ipa, level + 1, nlta);
+    }
+
+    // Page descriptor.
+    blk: {
+        const pdesc: PageDescriptor = @bitCast(desc);
+        if (level != max_level) break :blk;
+        if (!pdesc.valid or !pdesc.page) break :blk;
+
+        return pdesc.getOa() | (ipa & mem.page_mask_4kib);
+    }
+
+    return null;
+}
+
 /// Recursively map the given IPA to PA.
 ///
 /// This function maps pages using Block descriptors whenever possible.
@@ -263,6 +316,10 @@ const PageDescriptor = packed struct(u64) {
 
     pub fn setOa(self: *PageDescriptor, oa: usize) void {
         self.oa = @intCast(oa >> mem.page_shift_4kib);
+    }
+
+    pub fn getOa(self: PageDescriptor) usize {
+        return @as(usize, self.oa) << mem.page_shift_4kib;
     }
 };
 
