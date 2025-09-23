@@ -29,6 +29,10 @@ fn getGitSha(b: *std.Build) ![]const u8 {
             std.log.warn("Failed to get git SHA: {s}", .{@errorName(err)});
             break :blk "(unknown)";
         };
+        if (result.stdout.len < 7) {
+            std.log.warn("Git SHA is too short: {s}", .{result.stdout});
+            break :blk "(unknown)";
+        }
         return b.dupe(std.mem.trim(u8, result.stdout[0..7], "\n \t"));
     };
 }
