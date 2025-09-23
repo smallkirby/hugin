@@ -19,7 +19,7 @@ declare -g _qemu_start_time
 
 function qemu_print_version
 {
-  echo_normal "QEMU version: $(qemu-system-x86_64 --version | head -n 1)"
+  echo_normal "QEMU version: $($QEMU --version | head -n 1)"
 }
 
 # Start QEMU.
