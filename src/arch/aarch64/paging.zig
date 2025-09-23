@@ -243,10 +243,10 @@ fn numConcatenatedTables(t0sz: u8, level: LookupLevel) usize {
 /// Check if the given IPA to PA mapping can be done using a Block descriptor.
 fn canUseBlock(level: LookupLevel, remain: usize, pa: usize, ipa: usize, bsize: usize) bool {
     const mask = bsize - 1;
-    return (level >= 2) and
+    return (level < max_level) and
         (remain >= bsize) and
-        (pa % mask == 0) and
-        (ipa % mask == 0);
+        (pa & mask == 0) and
+        (ipa & mask == 0);
 }
 
 /// Size in bits of IA (Input Address).
