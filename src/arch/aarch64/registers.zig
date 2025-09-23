@@ -20,6 +20,9 @@ pub const SystemReg = enum {
     sctlr_el1,
     sctlr_el2,
     sctlr_el3,
+    far_el1,
+    far_el2,
+    far_el3,
 
     /// Get the string representation of the system register.
     pub fn str(comptime self: SystemReg) []const u8 {
@@ -39,6 +42,7 @@ pub const SystemReg = enum {
             .vbar_el1, .vbar_el2, .vbar_el3 => Vbar,
             .esr_el1, .esr_el2, .esr_el3 => Esr,
             .sctlr_el1, .sctlr_el2, .sctlr_el3 => Sctrr,
+            .far_el1, .far_el2, .far_el3 => Far,
         };
     }
 };
@@ -650,4 +654,12 @@ pub const Sctrr = packed struct(u64) {
     spintmask: u1,
     /// Reserved.
     tidcp: u1,
+};
+
+/// FAT_ELx.
+///
+/// Fault Address Register.
+pub const Far = packed struct(u64) {
+    /// Fault address.
+    addr: u64,
 };

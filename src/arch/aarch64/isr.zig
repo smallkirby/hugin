@@ -34,7 +34,10 @@ export fn syncHandler(ctx: *Context) callconv(.c) void {
         // Instruction abort.
         .iabort_lower, .iabort_cur => {
             const ifsc: regs.Esr.Ifsc = @enumFromInt(@as(u6, @truncate(sr.iss)));
+            const far = am.mrs(.far_el2);
+            const hcr_el2 = am.mrs(.hcr_el2);
             log.err("Instruction abort: {t}", .{ifsc});
+            log.err("FAR=0x{X}, HCR=0x{X:0>16}", .{ far.addr, @as(u64, @bitCast(hcr_el2)) });
             @panic("Abort.");
         },
 
