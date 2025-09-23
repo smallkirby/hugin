@@ -12,8 +12,8 @@ pub fn init() void {
 export fn irqHandler(ctx: *Context) callconv(.c) void {
     const lr = am.mrs(.elr_el2);
     const sr = am.mrs(.esr_el2);
-    log.debug(
-        "IRQ: LR=0x{X}, ESR={X:0>16}",
+    log.err(
+        "!!! IRQ: LR=0x{X}, ESR={X:0>16}",
         .{ lr.addr, @as(u64, @bitCast(sr)) },
     );
 
@@ -25,13 +25,27 @@ export fn irqHandler(ctx: *Context) callconv(.c) void {
 export fn syncHandler(ctx: *Context) callconv(.c) void {
     const lr = am.mrs(.elr_el2);
     const sr = am.mrs(.esr_el2);
-    log.debug(
-        "Synchronous exception: ELR=0x{X}, ESR={X:0>16}",
+    log.err(
+        "!!!! Synchronous exception: ELR=0x{X}, ESR={X:0>16}",
         .{ lr.addr, @as(u64, @bitCast(sr)) },
     );
 
+    switch (sr.ec) {
+        // Instruction abort.
+        .iabort_lower, .iabort_cur => {
+            const ifsc: regs.Esr.Ifsc = @enumFromInt(@as(u6, @truncate(sr.iss)));
+            log.err("Instruction abort: {t}", .{ifsc});
+            @panic("Abort.");
+        },
+
+        // Unhandled exception.
+        else => {
+            log.err("Unknown synchronous exception: {d}", .{sr.ec});
+            @panic("Abort.");
+        },
+    }
+
     _ = ctx;
-    @panic("");
 }
 
 /// Exception context.

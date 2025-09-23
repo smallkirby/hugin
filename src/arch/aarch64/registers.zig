@@ -500,4 +500,26 @@ pub const Esr = packed struct(u64) {
         len16 = 0,
         len32 = 1,
     };
+
+    /// Instruction Fault Status Code.
+    pub const Ifsc = enum(u6) {
+        addr_size_lvl0 = 0b000000,
+        addr_size_lvl1 = 0b000001,
+        addr_size_lvl2 = 0b000010,
+        addr_size_lvl3 = 0b000011,
+        trans_lv0 = 0b000100,
+        trans_lv1 = 0b000101,
+        trans_lv2 = 0b000110,
+        trans_lv3 = 0b000111,
+        access_lv1 = 0b001001,
+        access_lv2 = 0b001010,
+        access_lv3 = 0b001011,
+        access_lv0 = 0b001000,
+        perm_lv0 = 0b001100,
+        perm_lv1 = 0b001101,
+        perm_lv2 = 0b001110,
+        perm_lv3 = 0b001111,
+
+        _,
+    };
 };
