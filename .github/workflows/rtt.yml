@@ -43,4 +43,4 @@ jobs:
             -Doptimize=${{ matrix.BUILD_TYPE }} \
             -Druntime_test=true \
             -Duboot=$UBOOT
-          bash ./scripts/runtime_test.bash
+          bash ./scripts/runtime_test.bash $UBOOT
