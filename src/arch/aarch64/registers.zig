@@ -17,6 +17,9 @@ pub const SystemReg = enum {
     esr_el1,
     esr_el2,
     esr_el3,
+    sctlr_el1,
+    sctlr_el2,
+    sctlr_el3,
 
     /// Get the string representation of the system register.
     pub fn str(comptime self: SystemReg) []const u8 {
@@ -35,6 +38,7 @@ pub const SystemReg = enum {
             .vttbr_el2 => VttbrEl2,
             .vbar_el1, .vbar_el2, .vbar_el3 => Vbar,
             .esr_el1, .esr_el2, .esr_el3 => Esr,
+            .sctlr_el1, .sctlr_el2, .sctlr_el3 => Sctrr,
         };
     }
 };
@@ -522,4 +526,128 @@ pub const Esr = packed struct(u64) {
 
         _,
     };
+};
+
+/// SCTLR_ELx.
+///
+/// System Control Register.
+pub const Sctrr = packed struct(u64) {
+    /// MMU enable for EL1&0 stage 1 address translation.
+    m: bool,
+    /// Alignment check enable.
+    a: bool,
+    /// Data cache enable.
+    c: bool,
+    /// Stack Alignment Check Enable.
+    sa: bool,
+    /// Stack Alignment Check Enable for EL0.
+    sa0: bool,
+    /// Reserved.
+    cp15ben: u1,
+    /// Reserved.
+    naa: u1,
+    /// Reserved.
+    itd: u1,
+    /// Reserved.
+    sed: u1,
+    /// User Mask Access.
+    uma: bool,
+    /// Reserved.
+    enrctx: u1,
+    /// Reserved.
+    eos: u1,
+    /// Stage 1 instruction access Cacheability control.
+    i: u1,
+    /// Reserved.
+    endb: u1,
+    /// Traps EL0 execution of DC ZVA instruction to EL1 or EL2.
+    dze: bool,
+    /// Traps EL0 accesses to the CTR_EL0 to EL1 or EL2.
+    uct: bool,
+    /// Traps EL0 execution of WFI instruction to EL1 or EL2.
+    ntwi: bool,
+    /// Reserved.
+    _reserved0: u1 = 0,
+    /// Traps EL0 execution of WFE instruction to EL1 or EL2.
+    ntwe: bool,
+    /// Write permission implies XN.
+    wxn: bool,
+    /// Reserved.
+    tscxt: u1,
+    /// Reserved.
+    iesb: u1,
+    /// Reserved.
+    eis: u1,
+    /// Reserved.
+    span: u1,
+    /// Endianness of data access at EL0.
+    e0e: u1,
+    /// Endianness of data access at EL1.
+    ee: u1,
+    /// Traps EL0 execution of cache maintenance instructions to EL1 or EL2.
+    uci: bool,
+    /// Reserved.
+    enda: u1,
+    /// Reserved.
+    ntlsmd: u1,
+    /// Reserved.
+    lsmaoe: u1,
+    /// Reserved.
+    enib: u1,
+    /// Reserved.
+    enia: u1,
+    /// Reserved.
+    cmow: u1,
+    /// Reserved.
+    mscen: u1,
+    /// Reserved.
+    _reserved1: u1 = 0,
+    /// Reserved.
+    bt0: u1,
+    /// Reserved.
+    bt: u1,
+    /// Reserved.
+    itfsb: u1,
+    /// Reserved.
+    tcf0: u2,
+    /// Reserved.
+    tcf: u2,
+    /// Reserved.
+    ata0: u1,
+    // Reserved.
+    ata: u1,
+    // Reserved.
+    dssbs: u1,
+    // Reserved.
+    tweden: u1,
+    // Reserved.
+    twedel: u4,
+    /// Reserved.
+    tmt0: u1,
+    /// Reserved.
+    tmt: u1,
+    /// Reserved.
+    tme0: u1,
+    /// Reserved.
+    tme: u1,
+    /// Reserved.
+    enasr: u1,
+    /// Reserved.
+    enas0: u1,
+    /// Reserved.
+    enals: u1,
+    /// Reserved.
+    epan: u1,
+    /// Reserved.
+    tsco0: u1,
+    /// Reserved.
+    tsco: u1,
+    /// Reserved.
+    entp2: u1,
+    /// Reserved.
+    nmi: u1,
+    /// Reserved.
+    spintmask: u1,
+    /// Reserved.
+    tidcp: u1,
 };
