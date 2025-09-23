@@ -125,6 +125,10 @@ pub fn build(b: *std.Build) !void {
     hugin.linker_script = b.path("src/qemu.ld");
     hugin.root_module.addImport("hugin", hugin_module);
     hugin.root_module.addOptions("options", options);
+    hugin.root_module.addAssemblyFile(switch (target.result.cpu.arch) {
+        .aarch64 => b.path("src/arch/aarch64/isr.S"),
+        else => unreachable,
+    });
     b.installArtifact(hugin);
 
     // =============================================================

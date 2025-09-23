@@ -9,6 +9,11 @@ pub fn initPaging(ipa: usize, pa: usize, size: usize, pallocator: PageAllocator)
     try paging.mapS2(ipa, pa, size, pallocator);
 }
 
+/// Initialize interrupts for EL2.
+pub fn initInterrupts() void {
+    isr.init();
+}
+
 /// Halt until interrupt.
 pub fn halt() void {
     asm volatile ("wfi");
@@ -34,4 +39,5 @@ pub inline fn getSp() usize {
 const hugin = @import("hugin");
 const PageAllocator = hugin.mem.PageAllocator;
 
+const isr = @import("isr.zig");
 const paging = @import("paging.zig");

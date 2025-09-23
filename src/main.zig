@@ -85,6 +85,11 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
         );
     }
 
+    // Setup interrupts.
+    {
+        hugin.arch.initInterrupts();
+    }
+
     // Setup hypervisor configuration.
     {
         const hcr_el2 = std.mem.zeroInit(hugin.arch.regs.HcrEl2, .{

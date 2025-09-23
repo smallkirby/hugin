@@ -11,6 +11,12 @@ pub const SystemReg = enum {
     id_aa64mmfr0_el1,
     vtcr_el2,
     vttbr_el2,
+    vbar_el1,
+    vbar_el2,
+    vbar_el3,
+    esr_el1,
+    esr_el2,
+    esr_el3,
 
     /// Get the string representation of the system register.
     pub fn str(comptime self: SystemReg) []const u8 {
@@ -27,6 +33,8 @@ pub const SystemReg = enum {
             .id_aa64mmfr0_el1 => IdAa64Mmfr0,
             .vtcr_el2 => VtcrEl2,
             .vttbr_el2 => VttbrEl2,
+            .vbar_el1, .vbar_el2, .vbar_el3 => Vbar,
+            .esr_el1, .esr_el2, .esr_el3 => Esr,
         };
     }
 };
@@ -441,4 +449,55 @@ pub const VttbrEl2 = packed struct(u64) {
     baddr: u48,
     /// VMID for the translation table.
     vmid: u16,
+};
+
+/// VBAR_ELx.
+///
+/// Vector Base Address Register.
+/// Holds the vector base address for any exception that is taken to ELx.
+pub const Vbar = packed struct(u64) {
+    /// Vector base address.
+    addr: u64,
+};
+
+/// ESR_ELx.
+///
+/// Exception Syndrome Register.
+/// Holds syndrome information for an exception taken to ELx.
+pub const Esr = packed struct(u64) {
+    /// Instruction Specific Syndrome.
+    iss: u25,
+    /// Instruction Length for synchronous exceptions.
+    il: Length,
+    /// Exception class.
+    ec: Class,
+    /// Instruction Specific Syndrome.
+    iss2: u24,
+    /// Reserved.
+    _reserved: u8 = 0,
+
+    pub const Class = enum(u6) {
+        unknown = 0b000000,
+        bti = 0b001011,
+        illegal_exec_state = 0b001110,
+        svc_a32 = 0b010001,
+        hvc_a32 = 0b010010,
+        smc_a32 = 0b010011,
+        svc_a64 = 0b010101,
+        hvc_a64 = 0b010110,
+        smc_a64 = 0b010111,
+        iabort_lower = 0b100000,
+        iabort_cur = 0b100001,
+        pc_align = 0b100010,
+        dabort_lower = 0b100100,
+        dabort_cur = 0b100101,
+        sp_align = 0b100110,
+
+        _,
+    };
+
+    pub const Length = enum(u1) {
+        len16 = 0,
+        len32 = 1,
+    };
 };
