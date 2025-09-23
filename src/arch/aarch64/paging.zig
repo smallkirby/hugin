@@ -154,6 +154,7 @@ fn mapS2Recursive(state: *TransState, level: LookupLevel, tbl: usize, num_descs:
             pdesc.lattr.s2ap = state.perm;
             pdesc.lattr.memattr = 0b1111; // Normal memory, Write-Back Read-Allocate Write-Allocate Cacheable.
             pdesc.lattr.sh = .inner;
+            pdesc.lattr.af = true; // Prevent access flag fault on translations.
             pdesc.setOa(state.pa);
 
             desc.* = @bitCast(pdesc);
