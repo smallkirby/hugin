@@ -32,21 +32,10 @@ export fn syncHandler(ctx: *Context) callconv(.c) void {
 
     switch (sr.ec) {
         // Instruction abort.
-        .iabort_lower, .iabort_cur => {
-            const ifsc: regs.Esr.Ifsc = @enumFromInt(@as(u6, @truncate(sr.iss)));
-            const far = am.mrs(.far_el2);
-            const hcr_el2 = am.mrs(.hcr_el2);
-            log.err("Instruction abort: {t}", .{ifsc});
-            log.err("FAR=0x{X}, HCR=0x{X:0>16}", .{ far.addr, @as(u64, @bitCast(hcr_el2)) });
+        .iabort_lower, .iabort_cur => instAbortHandler(ctx),
 
-            if (paging.lookup(far.addr)) |pa| {
-                log.err("IPA 0x{X:0>16} -> PA 0x{X:0>16}", .{ far.addr, pa });
-            } else {
-                log.err("IPA 0x{X:0>16} -> (not mapped)", .{far.addr});
-            }
-
-            @panic("Abort.");
-        },
+        // Data abort.
+        .dabort_lower, .dabort_cur => dataAbortHandler(ctx),
 
         // Unhandled exception.
         else => {
@@ -54,8 +43,55 @@ export fn syncHandler(ctx: *Context) callconv(.c) void {
             @panic("Abort.");
         },
     }
+}
 
-    _ = ctx;
+/// Instruction abort handler.
+fn instAbortHandler(_: *Context) noreturn {
+    const sr = am.mrs(.esr_el2);
+
+    const ifsc: regs.Esr.Ifsc = @enumFromInt(@as(u6, @truncate(sr.iss)));
+    const far = am.mrs(.far_el2);
+    const hcr_el2 = am.mrs(.hcr_el2);
+    log.err("Instruction abort: {t}", .{ifsc});
+    log.err("FAR=0x{X}, HCR=0x{X:0>16}", .{ far.addr, @as(u64, @bitCast(hcr_el2)) });
+
+    if (paging.lookup(far.addr)) |pa| {
+        log.err("IPA 0x{X:0>16} -> PA 0x{X:0>16}", .{ far.addr, pa });
+    } else {
+        log.err("IPA 0x{X:0>16} -> (not mapped)", .{far.addr});
+    }
+
+    @panic("Abort.");
+}
+
+/// Data abort handler.
+fn dataAbortHandler(ctx: *Context) void {
+    const sr = am.mrs(.esr_el2);
+    const iss: regs.Esr.IssDabort = @bitCast(sr.iss);
+    log.err("Data abort: {t}", .{iss.dfsc});
+
+    if (!iss.isv) {
+        @panic("DFSC.ISV is not set, indicating no Instruction Syndrome is available.");
+    }
+
+    // Print faulting information.
+    const reg_value = @as([*]const u64, @ptrCast(ctx))[iss.srt_wu];
+    const hpfar = am.mrs(.hpfar_el2);
+    const far = am.mrs(.far_el2);
+    const fipa = hpfar.ipa() | (far.addr & hugin.mem.page_mask);
+
+    log.err("Faulting IPA: [0x{X:0>16}] {s} {s}{d} (0x{X})", .{
+        fipa,
+        if (iss.wnr == .write) "<=" else "=>",
+        if (iss.sf_fnp) "X" else "W",
+        iss.srt_wu,
+        reg_value,
+    });
+
+    // Advance ELR.
+    const elr = am.mrs(.elr_el2);
+    const next_elr: regs.Elr = .{ .addr = elr.addr + 4 };
+    am.msr(.elr_el2, next_elr);
 }
 
 /// Exception context.
@@ -100,6 +136,9 @@ const Context = extern struct {
 
 const std = @import("std");
 const log = std.log.scoped(.isr);
+
+const hugin = @import("hugin");
+const bits = hugin.bits;
 
 const am = @import("asm.zig");
 const paging = @import("paging.zig");

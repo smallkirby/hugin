@@ -23,6 +23,7 @@ pub const SystemReg = enum {
     far_el1,
     far_el2,
     far_el3,
+    hpfar_el2,
 
     /// Get the string representation of the system register.
     pub fn str(comptime self: SystemReg) []const u8 {
@@ -43,6 +44,7 @@ pub const SystemReg = enum {
             .esr_el1, .esr_el2, .esr_el3 => Esr,
             .sctlr_el1, .sctlr_el2, .sctlr_el3 => Sctrr,
             .far_el1, .far_el2, .far_el3 => Far,
+            .hpfar_el2 => Hpfar,
         };
     }
 };
@@ -510,23 +512,106 @@ pub const Esr = packed struct(u64) {
     };
 
     /// Instruction Fault Status Code.
+    ///
+    /// ISS[5:0] when EC is `.iabort_lower` or `iabort_cur`.
     pub const Ifsc = enum(u6) {
         addr_size_lvl0 = 0b000000,
         addr_size_lvl1 = 0b000001,
         addr_size_lvl2 = 0b000010,
         addr_size_lvl3 = 0b000011,
+
         trans_lv0 = 0b000100,
         trans_lv1 = 0b000101,
         trans_lv2 = 0b000110,
         trans_lv3 = 0b000111,
+
         af_lv1 = 0b001001,
         af_lv2 = 0b001010,
         af_lv3 = 0b001011,
         af_lv0 = 0b001000,
+
         perm_lv0 = 0b001100,
         perm_lv1 = 0b001101,
         perm_lv2 = 0b001110,
         perm_lv3 = 0b001111,
+
+        _,
+    };
+
+    /// ISS encoding for Data Abort.
+    pub const IssDabort = packed struct(u25) {
+        /// Data Fault Status Code.
+        dfsc: Dfsc,
+        /// Write not Read,
+        ///
+        /// Indicates whether a synchronous abort was caused by an instruction writing to a memory location,
+        /// or by an instruction reading from a memory location.
+        wnr: enum(u1) {
+            read = 0,
+            write = 1,
+        },
+        /// Stage 1 Page Table Walk.
+        ///
+        /// For a stage 2 fault, indicates whether the fault was a stage 2 fault on an access made for a stage 1 translation table walk.
+        /// Otherwise, reserved.
+        s1ptw: u1,
+        /// Cache maintenance.
+        cm: u1,
+        /// External abort type.
+        /// Otherwise, fixed to 0.
+        ea: u1,
+        /// FAR not Valid when a synchronous Externnal abort.
+        fnv: bool,
+        ///
+        lst_set: u2,
+        ///
+        vncr: u1,
+        ///
+        ar_pfv: u1,
+        /// When ISV is set, Sixty Four bit general-purpose register transfer.
+        /// Width of the register accessed by the instruction is 64-bit.
+        sf_fnp: bool,
+        /// If ISV is set, Syndrome Register Transfer.
+        /// The register number of the Wt/Xt/Rt operand of the faulting instruction.
+        srt_wu: u5,
+        ///
+        sse_toplevel: u1,
+        /// When ISV is set, Syndrome Access Size.
+        ///
+        /// Indicates the size of the access attempted by the faulting operation.
+        sas: enum(u2) {
+            byte = 0b00,
+            halfword = 0b01,
+            word = 0b10,
+            doubleword = 0b11,
+        },
+        /// Instruction Syndrome Valid.
+        ///
+        /// Indicates whether the syndrome information in ISS[23:14] is valid.
+        isv: bool,
+    };
+
+    /// Data Abort Fault Status Code.
+    pub const Dfsc = enum(u6) {
+        addr_size_lvl0 = 0b000000,
+        addr_size_lvl1 = 0b000001,
+        addr_size_lvl2 = 0b000010,
+        addr_size_lvl3 = 0b000011,
+
+        trans_lvl0 = 0b000100,
+        trans_lvl1 = 0b000101,
+        trans_lvl2 = 0b000110,
+        trans_lvl3 = 0b000111,
+
+        af_lvl0 = 0b001000,
+        af_lvl1 = 0b001001,
+        af_lvl2 = 0b001010,
+        af_lvl3 = 0b001011,
+
+        perm_lvl0 = 0b001100,
+        perm_lvl1 = 0b001101,
+        perm_lvl2 = 0b001110,
+        perm_lvl3 = 0b001111,
 
         _,
     };
@@ -663,3 +748,27 @@ pub const Far = packed struct(u64) {
     /// Fault address.
     addr: u64,
 };
+
+/// HPFAR_EL2.
+///
+/// Hypervisor IPA Fault Address Register.
+pub const Hpfar = packed struct(u64) {
+    /// Reserved.
+    _reserved0: u4 = 0,
+    /// Faulting IPA.
+    fipa: u44,
+    /// Reserved.
+    _reserved: u15 = 0,
+    /// Faulting IPA address space secure.
+    ns: bool,
+
+    pub fn ipa(self: Hpfar) u64 {
+        return @as(u64, self.fipa << hugin.mem.page_shift_4kib);
+    }
+};
+
+// =============================================================
+// Imports
+// =============================================================
+
+const hugin = @import("hugin");
