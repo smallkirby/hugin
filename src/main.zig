@@ -106,10 +106,14 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
             .m_elsp = 0b0101, // EL1h
         });
         const elr_el2 = hugin.arch.regs.Elr{
-            .addr = @intFromPtr(&el1Main),
+            .addr = @intFromPtr(&el1Entry),
         };
         hugin.arch.am.msr(.spsr_el2, spsr_el2);
         hugin.arch.am.msr(.elr_el2, elr_el2);
+
+        const el1stack = try hugin.mem.page_allocator.allocPages(3);
+        log.debug("SP_EL1=0x{X:0>16}", .{@intFromPtr(el1stack.ptr)});
+        hugin.arch.am.msr(.sp_el1, @bitCast(@intFromPtr(el1stack.ptr)));
 
         log.info("Switching to EL1h...", .{});
         hugin.arch.am.eret();
@@ -121,26 +125,20 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
     }
 }
 
-export fn el1Main() callconv(.naked) noreturn {
-    // Terminate QEMU for runtime test.
-    // We can't call `hugin.terminateQemu()` in the naked function.
-    if (hugin.is_runtime_test) {
-        asm volatile (
-            \\adrp x16, .Lhandle
-            \\add x16, x16, :lo12:.Lhandle
-            \\
-            \\mov x0, #0x18
-            \\mov x1, x16
-            \\hlt #0xF000
-            \\
-            \\.Lhandle:
-            \\.quad 0x20026
-            \\.quad 0x0
-        );
-    }
+export fn el1Entry() callconv(.c) noreturn {
+    el1Main() catch |err| {
+        log.err("EL1 aborted with error: {t}", .{err});
+        hugin.endlessHalt();
+    };
 
     while (true) {
         asm volatile ("wfi");
+    }
+}
+
+fn el1Main() !void {
+    if (hugin.is_runtime_test) {
+        hugin.terminateQemu(0);
     }
 }
 

@@ -24,6 +24,10 @@ pub const SystemReg = enum {
     far_el2,
     far_el3,
     hpfar_el2,
+    sp_el0,
+    sp_el1,
+    sp_el2,
+    sp_el3,
 
     /// Get the string representation of the system register.
     pub fn str(comptime self: SystemReg) []const u8 {
@@ -45,6 +49,7 @@ pub const SystemReg = enum {
             .sctlr_el1, .sctlr_el2, .sctlr_el3 => Sctrr,
             .far_el1, .far_el2, .far_el3 => Far,
             .hpfar_el2 => Hpfar,
+            .sp_el0, .sp_el1, .sp_el2, .sp_el3 => Sp,
         };
     }
 };
@@ -765,6 +770,12 @@ pub const Hpfar = packed struct(u64) {
     pub fn ipa(self: Hpfar) u64 {
         return @as(u64, self.fipa << hugin.mem.page_shift_4kib);
     }
+};
+
+/// SP_ELx.
+pub const Sp = packed struct(u64) {
+    /// Stack pointer.
+    addr: u64,
 };
 
 // =============================================================
