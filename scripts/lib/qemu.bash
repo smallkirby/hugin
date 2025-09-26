@@ -78,10 +78,10 @@ function qemu_start()
     wait $_qemu_pid
     echo $? > "$log_file.result"
   ) &
+
+  sleep 2
   QEMU_PID=$(cat "$_qemu_pidfile")
   _qemu_start_time=$(date +%s)
-
-  sleep 1
 
   if ! pgrep "qemu" > /dev/null; then
     echo_error "Failed to start QEMU."
