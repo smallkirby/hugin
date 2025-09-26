@@ -7,20 +7,52 @@ source "$(dirname "$0")/lib/util.bash"
 
 TIMEOUT=20
 TMPFILE=$(mktemp)
-MONITOR_SOCKET="/tmp/qemu-monitor-rtt-hid-$$"
+MONITOR_SOCKET="/tmp/qemu-monitor-rtt-$$"
 
 # Success indicators.
 HEYSTACK=(
   "[INFO ] main    | Switching to EL1h..."
 )
 
-# Check the num of arguments
-if [ $# -ne 1 ]; then
-  echo_error "Usage: $0 <uboot directory>"
+USE_SUDO=0
+UBOOT_DIR=
+
+function usage_exit()
+{
+  echo "Usage: $0 [--uboot <uboot directory>] [--use-sudo]"
   exit 1
+}
+
+# Parse arguments.
+ARGS=$(getopt \
+  --longoptions uboot:use-sudo \
+  --options u:s \
+  -- "$@" \
+)
+if [ $? -ne 0 ]; then
+  usage_exit
 fi
-UBOOT_DIR=$1
-echo_normal "Using U-Boot directory: $UBOOT_DIR"
+eval set -- "$ARGS"
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    -u|--uboot)
+      UBOOT_DIR="$2"
+      shift 2
+      ;;
+    -s|--use-sudo)
+      USE_SUDO=1
+      shift
+      ;;
+    --)
+      shift
+      ;;
+    *)
+      echo_error "Unknown argument: $1"
+      usage_exit
+      ;;
+  esac
+done
 
 # Check the output for expected strings.
 function check_success()
@@ -47,7 +79,7 @@ function cleanup() {
   echo ""
   echo_normal "Cleaning up..."
 
-  if [ -n "${QEMU_PID:-}" ] ; then
+  if [ "$(is_qemu_alive)" -eq 1 ] ; then
     qemu_exit
   fi
   rm -f "$TMPFILE" "$MONITOR_SOCKET"
@@ -66,7 +98,7 @@ function main()
     "$TMPFILE" \
     "$TIMEOUT" \
     "$UBOOT_DIR"
-  qemu_wait
+  qemu_wait "$USE_SUDO"
 
   echo ""
 
@@ -74,8 +106,8 @@ function main()
     echo_error "Timeout."
     exit 1
   fi
-  local ret=$((QEMU_RETVAL >> 1))
-  if [ $((ret << 1)) -ne 0 ]; then
+  local ret=$QEMU_RETVAL
+  if [ "$ret" -ne 0 ]; then
     echo_error "QEMU exited with error code $ret."
     exit 1
   fi

@@ -16,6 +16,8 @@ MEMORY=1G
 declare -g _qemu_monitor_socket
 declare -g _qemu_timeout
 declare -g _qemu_start_time
+declare -g _qemu_pidfile
+declare -g _qemu_resultfile
 
 function qemu_print_version
 {
@@ -41,7 +43,9 @@ function qemu_start()
   local efi_root_dir="$1"
   _qemu_monitor_socket="$2"
   local log_file="$3"
+  _qemu_pidfile="$3.pid"
   _qemu_timeout="$4"
+  _qemu_resultfile="$3.result"
   _uboot="$5"
   local bios="$_uboot/u-boot.bin"
 
@@ -49,6 +53,7 @@ function qemu_start()
   echo_normal "  EFI directory  : $efi_root_dir"
   echo_normal "  Monitor socket : $_qemu_monitor_socket"
   echo_normal "  Log file       : $log_file"
+  echo_normal "  PID file       : $_qemu_pidfile"
   echo_normal "  Timeout        : $_qemu_timeout seconds"
   echo_normal "  Memory         : $MEMORY"
   echo_normal "  CPU cores      : $NUM_CORES"
@@ -68,10 +73,12 @@ function qemu_start()
         -d guest_errors \
         -semihosting \
     2>&1 &
-    echo $! > "$log_file.pid"
-    wait
+    local _qemu_pid=$!
+    echo "$_qemu_pid" > "$log_file.pid"
+    wait $_qemu_pid
+    echo $? > "$log_file.result"
   ) &
-  QEMU_PID=$(cat "$log_file.pid")
+  QEMU_PID=$(cat "$_qemu_pidfile")
   _qemu_start_time=$(date +%s)
 
   sleep 1
@@ -100,18 +107,38 @@ function qemu_nmi()
   echo "nmi" | socat - "$_qemu_monitor_socket"
 }
 
-# Exit QEMU gracefully.
+# Exit QEMU gracefully via QEMU monitor.
 #
 # If QEMU is not running, this function does nothing.
 function qemu_exit()
 {
-  if ! kill -0 "$QEMU_PID" 2>/dev/null; then
-    return
-  fi
-
-  echo_normal "Quitting QEMU..."
   echo "quit" | socat - "$_qemu_monitor_socket"
   qemu_wait
+}
+
+# Kill QEMU process.
+function qemu_kill()
+{
+  USE_SUDO=${1:-0}
+  if [ "$USE_SUDO" -ne 0 ]; then
+    if ! sudo kill -0 "$QEMU_PID" 2>/dev/null; then
+      return
+    fi
+  else
+    if ! kill -0 "$QEMU_PID" 2>/dev/null; then
+      return
+    fi
+  fi
+}
+
+# Check if QEMU process is alive.
+function is_qemu_alive()
+{
+  if kill -0 "$QEMU_PID" 2>/dev/null; then
+    echo 1
+  else
+    echo 0
+  fi
 }
 
 # Wait for QEMU to finish and capture its exit code.
@@ -120,10 +147,12 @@ function qemu_exit()
 # The exit code will be stored in the global variable QEMU_RETVAL.
 function qemu_wait()
 {
+  USE_SUDO=${1:-0}
+
   local sleep_interval=1
   local timed_out=0
 
-  while kill -0 "$QEMU_PID" 2>/dev/null; do
+  while [ "$(is_qemu_alive)" -eq 1 ]; do
     local current_time=$(date +%s)
     local elapsed=$(( current_time - _qemu_start_time ))
 
@@ -132,17 +161,23 @@ function qemu_wait()
       qemu_nmi
       timed_out=1
       sleep 1
-      qemu_exit
+
+      if [ "$(is_qemu_alive)" -eq 1 ]; then
+        echo_normal "Killing QEMU..."
+        qemu_kill "$USE_SUDO"
+      fi
+
       break
     fi
     sleep $sleep_interval
   done
 
-  wait "$QEMU_PID" || true
-  # TODO: This retval is not QEMU's one.
-  QEMU_RETVAL=$?
+  QEMU_RETVAL=$(cat "$_qemu_resultfile" || echo 1)
+  if [ -z "$QEMU_RETVAL" ]; then
+    QEMU_RETVAL=-1
+  fi
 
-  # Set timeout exit code if we timed out
+  # Timeout
   if [ $timed_out -eq 1 ]; then
     QEMU_RETVAL=124
   fi
