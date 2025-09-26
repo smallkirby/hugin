@@ -46,6 +46,9 @@ pub fn build(b: *std.Build) !void {
         .cpu_features_add = std.Target.aarch64.featureSet(&[_]Feature{
             .v8a,
         }),
+        .cpu_features_sub = std.Target.aarch64.featureSet(&[_]Feature{
+            .neon,
+        }),
         .ofmt = .elf,
     });
     const optimize = b.standardOptimizeOption(.{});
