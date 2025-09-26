@@ -25,7 +25,7 @@ function usage_exit()
 
 # Parse arguments.
 ARGS=$(getopt \
-  --longoptions uboot:use-sudo \
+  --longoptions uboot:,use-sudo \
   --options u:s \
   -- "$@" \
 )
