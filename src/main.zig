@@ -102,6 +102,7 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
 
     // Jump to EL1h.
     {
+        // Setup EL1 state.
         const spsr_el2 = std.mem.zeroInit(hugin.arch.regs.Spsr, .{
             .m_elsp = 0b0101, // EL1h
         });
@@ -111,10 +112,16 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
         hugin.arch.am.msr(.spsr_el2, spsr_el2);
         hugin.arch.am.msr(.elr_el2, elr_el2);
 
-        const el1stack = try hugin.mem.page_allocator.allocPages(3);
-        log.debug("SP_EL1=0x{X:0>16}", .{@intFromPtr(el1stack.ptr)});
-        hugin.arch.am.msr(.sp_el1, @bitCast(@intFromPtr(el1stack.ptr)));
+        // Setup SP_EL1.
+        const el1stack_sizep = 3;
+        const el1stack = try hugin.mem.page_allocator.allocPages(el1stack_sizep);
+        log.debug(
+            "SP_EL1: 0x{X:0>16}",
+            .{@intFromPtr(el1stack.ptr) + el1stack_sizep * hugin.mem.size_4kib},
+        );
+        hugin.arch.am.msr(.sp_el1, @bitCast(@intFromPtr(el1stack.ptr) + el1stack_sizep * hugin.mem.size_4kib));
 
+        // Jump to EL1h.
         log.info("Switching to EL1h...", .{});
         hugin.arch.am.eret();
     }
