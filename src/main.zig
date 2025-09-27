@@ -144,6 +144,8 @@ export fn el1Entry() callconv(.c) noreturn {
 }
 
 fn el1Main() !void {
+    log.info("Hello from EL1!", .{});
+
     if (hugin.is_runtime_test) {
         hugin.terminateQemu(0);
     }

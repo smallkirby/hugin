@@ -48,6 +48,7 @@ pub fn build(b: *std.Build) !void {
         }),
         .cpu_features_sub = std.Target.aarch64.featureSet(&[_]Feature{
             .neon,
+            .fp_armv8,
         }),
         .ofmt = .elf,
     });
