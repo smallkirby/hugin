@@ -28,6 +28,14 @@ pub const SystemReg = enum {
     sp_el1,
     sp_el2,
     sp_el3,
+    mpidr_el1,
+    icc_sre_el1,
+    icc_sre_el2,
+    icc_sre_el3,
+    icc_pmr_el1,
+    icc_bpr0_el1,
+    icc_bpr1_el1,
+    icc_igrpen1_el1,
 
     /// Get the string representation of the system register.
     pub fn str(comptime self: SystemReg) []const u8 {
@@ -50,6 +58,11 @@ pub const SystemReg = enum {
             .far_el1, .far_el2, .far_el3 => Far,
             .hpfar_el2 => Hpfar,
             .sp_el0, .sp_el1, .sp_el2, .sp_el3 => Sp,
+            .mpidr_el1 => Mpidr,
+            .icc_sre_el1, .icc_sre_el2, .icc_sre_el3 => IccSre,
+            .icc_pmr_el1 => IccPmr,
+            .icc_bpr0_el1, .icc_bpr1_el1 => IccBpr,
+            .icc_igrpen1_el1 => IccIgrpen1El1,
         };
     }
 };
@@ -776,6 +789,82 @@ pub const Hpfar = packed struct(u64) {
 pub const Sp = packed struct(u64) {
     /// Stack pointer.
     addr: u64,
+};
+
+/// MPIDR_EL1.
+///
+/// Multiprocessor Affinity Register.
+pub const Mpidr = packed struct(u64) {
+    /// Affinity level 0.
+    aff0: u8,
+    /// Affinity level 1.
+    aff1: u8,
+    /// Affinity level 2.
+    aff2: u8,
+    /// Indicates whether the lowest level of affinity consists of logical PEs that are implemented using an interdependent approach.
+    mt: u1,
+    /// Reserved.
+    _reserved0: u5 = 0,
+    /// Indicates a Uniprocessor system.
+    u: bool,
+    /// Reserved.
+    _reserved1: u1 = 0,
+    /// Affinity level 3.
+    aff3: u8,
+    /// Reserved.
+    _reserved2: u24 = 0,
+
+    /// Get the affinity value masking all other bits.
+    pub fn affinity(self: Mpidr) u64 {
+        const value = @as(u64, @bitCast(self));
+        return value & 0x0000_00FF_00FF_FFFF;
+    }
+};
+
+/// ICC_SRE_ELx.
+///
+/// Interrupt Controller System Register Enable Register.
+pub const IccSre = packed struct(u64) {
+    /// System Register Enable.
+    sre: bool,
+    /// Disable FIQ bypass.
+    dfb: bool,
+    /// Disable IRQ bypass.
+    dib: bool,
+    /// Enables lower Exception level access to ICC_SRE_ELx.
+    enable: bool,
+    /// Reserved.
+    _reserved: u60 = 0,
+};
+
+/// ICC_PMR_EL1.
+///
+/// Interrupt Controller Interrupt Priority Mask Register.
+pub const IccPmr = packed struct(u64) {
+    /// Priority mask.
+    priority: u8,
+    /// Reserved.
+    _reserved: u56 = 0,
+};
+
+/// ICC_BPRn_EL1. (n = 0,1)
+///
+/// Interrupt Controller Binary Point Register n.
+pub const IccBpr = packed struct(u64) {
+    /// Binary point.
+    bpr: u3,
+    /// Reserved.
+    _reserved: u61 = 0,
+};
+
+/// ICC_IGRPEN1_EL1.
+///
+/// Interrupt Controller Interrupt Group 1 Enable Register.
+pub const IccIgrpen1El1 = packed struct(u64) {
+    /// Enable Group 0 interrupts.
+    enable: bool,
+    /// Reserved.
+    _reserved: u63 = 0,
 };
 
 // =============================================================

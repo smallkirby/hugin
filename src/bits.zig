@@ -110,6 +110,45 @@ pub fn embed(n: anytype, value: anytype, comptime offset: usize) @TypeOf(n) {
     return @bitCast(result);
 }
 
+/// Set the nth bit.
+///
+/// - `val` : The integer to modify.
+/// - `nth` : The bit position to set.
+pub fn set(val: anytype, nth: anytype) @TypeOf(val) {
+    const int_nth = switch (@typeInfo(@TypeOf(nth))) {
+        .int, .comptime_int => nth,
+        .@"enum" => @intFromEnum(nth),
+        else => @compileError("isset: invalid type"),
+    };
+    return val | (@as(@TypeOf(val), 1) << @intCast(int_nth));
+}
+
+/// Unset the nth bit.
+///
+/// - `val` : The integer to modify.
+/// - `nth` : The bit position to unset.
+pub fn unset(val: anytype, nth: anytype) @TypeOf(val) {
+    const int_nth = switch (@typeInfo(@TypeOf(nth))) {
+        .int, .comptime_int => nth,
+        .@"enum" => @intFromEnum(nth),
+        else => @compileError("isset: invalid type"),
+    };
+    return val & ~(@as(@TypeOf(val), 1) << @intCast(int_nth));
+}
+
+/// Check if the nth bit is set.
+///
+/// - `val` : The integer to check.
+/// - `nth` : The bit position to check.
+pub fn isset(val: anytype, nth: anytype) bool {
+    const int_nth = switch (@typeInfo(@TypeOf(nth))) {
+        .int, .comptime_int => nth,
+        .@"enum" => @intFromEnum(nth),
+        else => @compileError("isset: invalid type"),
+    };
+    return ((val >> @intCast(int_nth)) & 1) != 0;
+}
+
 /// Get the representative integer type.
 fn RepInt(T: type) type {
     return switch (@sizeOf(T)) {
@@ -148,6 +187,26 @@ test "extract" {
     try testing.expectEqual(@as(u8, 0x21), extract(u8, s, 8));
     try testing.expectEqual(@as(u16, 0x3456), extract(u16, s, 16));
     try testing.expectEqual(@as(u32, 0x789ABCDE), extract(u32, s, 32));
+}
+
+test "set" {
+    try testing.expectEqual(0b11, set(0b01, 1));
+    try testing.expectEqual(0b101, set(0b001, 2));
+    try testing.expectEqual(0b1000_0000, set(0b0000_0000, 7));
+}
+
+test "unset" {
+    try testing.expectEqual(0b01, unset(@as(u32, 0b11), 1));
+    try testing.expectEqual(0b001, unset(@as(u32, 0b101), 2));
+    try testing.expectEqual(0b101, unset(@as(u32, 0b101), 1));
+    try testing.expectEqual(0b0000_0000, unset(@as(u32, 0b1000_0000), 7));
+}
+
+test "isset" {
+    try testing.expectEqual(true, isset(0b10, 1));
+    try testing.expectEqual(false, isset(0b10, 0));
+    try testing.expectEqual(true, isset(0b1000_0000, 7));
+    try testing.expectEqual(false, isset(0b1000_0000, 99));
 }
 
 // =============================================================

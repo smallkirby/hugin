@@ -1,0 +1,346 @@
+//! GIC, Generic Interrupt Controller version 3
+
+/// Interrupt ID.
+pub const IntrId = u10;
+/// Interrupt Priority.
+pub const Priority = u8;
+
+/// Provides the routing configuration for SPIs (Shared Peripheral Interrupts).
+const Distributor = struct {
+    const Self = @This();
+
+    /// MMIO base address.
+    base: usize,
+
+    /// Register map.
+    const map = struct {
+        /// Distributor Control Register.
+        const ctlr = 0x0000;
+        /// Interrupt Set-Enable Registers.
+        const isenabler = 0x0100;
+        /// Interrupt Priority Registers.
+        const ipriorityr = 0x0400;
+        /// Interrupt Configuration Registers.
+        const icfgr = 0x0C00;
+        /// Interrupt Group Modifier Registers.
+        const igrpmodr = 0x0D00;
+        /// Interrupt Group Registers.
+        const igroupr = 0x1000;
+        /// Interrupt Routing Registers.
+        const irouter = 0x6000;
+    };
+
+    /// GICD_CTLR.
+    ///
+    /// Enables interrupts and affinity routing.
+    const Ctlr = packed struct(u32) {
+        /// When `.are_ns` is set, Enable Group 0 interrupts. Otherwise, reserved.
+        enable_grp0: bool,
+        /// When `.are_ns` is set, Enable Group 1 interrupts. Otherwise, reserved.
+        enable_grp1: bool,
+        /// Reserved.
+        _reserved0: u2 = 0,
+        /// Affinity routing enable.
+        are_ns: bool,
+        /// Reserved.
+        _reserved1: u26 = 0,
+        /// Register Write Pending (RO).
+        ///
+        /// Indicates that a write operation to the GICD_CTLR is in progress.
+        rwp: bool,
+    };
+
+    /// GICD_ISENABLER<n>.
+    ///
+    /// Enables forwarding of the corresponding interrupt.
+    /// Consists of 32 bits, each bit corresponds to an interrupt.
+    const Isenabler = u32;
+
+    /// GICD_IPRIORITYR<n>.
+    ///
+    /// Holds the priority of corresponding interrupt.
+    /// Each register holds 4 interrupt priorities.
+    const Ipriorityr = packed struct(u32) {
+        prio0: Priority,
+        prio1: Priority,
+        prio2: Priority,
+        prio3: Priority,
+    };
+
+    /// GICD_ICFGR<n>.
+    ///
+    /// Determines whether the corresponding interrupt is edge-triggered or level-sensitive.
+    const Icfgr = u32;
+
+    /// Interrupt trigger type.
+    const Trigger = enum(u2) {
+        level = 0b00,
+        edge = 0b10,
+    };
+
+    /// GICD_IGRPMODR<n>.
+    ///
+    /// When affinity routing is enabled, the bit corresponding to an interrupt is cancatenated to GICD_IGROUPR<n>
+    /// to form a 2-bit field that determines the interrupt's group.
+    const Igrpmodr = u32;
+
+    /// GICD_IGROUPR<n>.
+    ///
+    /// See GICD_IGRPMODR<n>.
+    const Igroupr = u32;
+
+    /// Interrupt group.
+    ///
+    /// (modifier, group):
+    /// - (0, 0): Secure Group 0
+    /// - (0, 1): Non-secure Group 1
+    /// - (1, 0): Secure Group 1
+    /// - (1, 1): Reserved.
+    const Group = enum(u2) {
+        secure_grp0 = 0,
+        ns_grp1 = 1,
+        secure_grp1 = 2,
+        reserved = 3,
+    };
+
+    /// GICD_IROUTER<n>.
+    const Irouter = u64;
+
+    /// Initialize the distributor.
+    pub fn init(self: Self) void {
+        self.write(map.ctlr, std.mem.zeroInit(Ctlr, .{
+            .are_ns = true,
+        }));
+        self.waitRwp();
+
+        self.write(map.ctlr, std.mem.zeroInit(Ctlr, .{
+            .are_ns = true,
+            .enable_grp1 = true,
+        }));
+        self.waitRwp();
+    }
+
+    /// Set the priority of an interrupt.
+    pub fn setPriority(self: Self, id: IntrId, prio: Priority) void {
+        const reg_index = id / 4 * @sizeOf(Priority);
+        const reg_addr = self.base + map.ipriorityr + reg_index * @sizeOf(Ipriorityr);
+
+        var reg_value = self.read(reg_addr, Ipriorityr);
+        switch (id % 4) {
+            0 => reg_value.prio0 = prio,
+            1 => reg_value.prio1 = prio,
+            2 => reg_value.prio2 = prio,
+            3 => reg_value.prio3 = prio,
+            else => unreachable,
+        }
+
+        self.write(reg_addr, reg_value);
+    }
+
+    /// Set the interrupt group of an interrupt.
+    pub fn setGroup(self: Self, id: IntrId, group: Group) void {
+        const reg_index = id / @bitSizeOf(Igroupr);
+        const nth = id % @bitSizeOf(Igroupr);
+
+        // Set GICD_IGROUPR<n>.
+        const igroupr_addr = self.base + map.igroupr + reg_index * @sizeOf(Igroupr);
+        const igroupr = self.read(igroupr_addr, Igroupr);
+        self.write(igroupr_addr, switch (group) {
+            .secure_grp0, .secure_grp1 => hugin.bits.unset(igroupr, nth),
+            .ns_grp1 => hugin.bits.set(igroupr, nth),
+            .reserved => unreachable,
+        });
+
+        // Set GICD_IGRPMODR<n>.
+        const igrpmodr_addr = self.base + map.igrpmodr + reg_index * @sizeOf(Igrpmodr);
+        const igrpmodr = self.read(igrpmodr_addr, Igrpmodr);
+        self.write(igrpmodr_addr, switch (group) {
+            .secure_grp0, .ns_grp1 => hugin.bits.unset(igrpmodr, nth),
+            .secure_grp1 => hugin.bits.set(igrpmodr, nth),
+            .reserved => unreachable,
+        });
+    }
+
+    /// Set the trigger type of an interrupt.
+    pub fn setTrigger(self: Self, id: IntrId, trigger: Trigger) void {
+        const reg_index = id / 16;
+        const nth: u5 = @intCast((id % 16) * 2);
+        const icfgr_addr = self.base + map.icfgr + reg_index * @sizeOf(Icfgr);
+
+        const icfgr = self.read(icfgr_addr, Icfgr);
+        const new = (icfgr & ~(@as(Icfgr, 0b11) << nth)) | (@as(Icfgr, @intFromEnum(trigger)) << nth);
+        self.write(icfgr_addr, new);
+    }
+
+    /// Set the routing of an interrupt to a specific affinity.
+    pub fn setRouting(self: Self, id: IntrId, affinity: u64) void {
+        const reg_index = id;
+        const irouter_addr = self.base + map.irouter + reg_index * @sizeOf(Irouter);
+        self.write(irouter_addr, affinity);
+    }
+
+    /// Enable an interrupt.
+    pub fn enable(self: Self, id: IntrId) void {
+        const reg_index = id / @bitSizeOf(Isenabler);
+        const nth = id % @bitSizeOf(Isenabler);
+        const isenabler_addr = self.base + map.isenabler + reg_index * @sizeOf(Isenabler);
+
+        const isenabler = self.read(isenabler_addr, Isenabler);
+        self.write(isenabler_addr, hugin.bits.set(isenabler, nth));
+    }
+
+    /// Write to a register.
+    fn write(self: Self, offset: usize, value: anytype) void {
+        switch (@bitSizeOf(@TypeOf(value))) {
+            32 => @as(*volatile u32, @ptrFromInt(self.base + offset)).* = @bitCast(value),
+            64 => @as(*volatile u64, @ptrFromInt(self.base + offset)).* = @bitCast(value),
+            else => unreachable,
+        }
+    }
+
+    /// Read from a register.
+    fn read(self: Self, offset: usize, T: type) T {
+        const value = @as(*volatile u32, @ptrFromInt(self.base + offset)).*;
+        return @bitCast(value);
+    }
+
+    /// Block until the RWP bit is cleared.
+    fn waitRwp(self: Self) void {
+        while (self.read(map.ctlr, Ctlr).rwp) {
+            std.atomic.spinLoopHint();
+        }
+    }
+};
+
+/// Provides the configuration settings for PPIs (Private Peripheral Interrupts) and SGIs (Software Generated Interrupts).
+const Redistributor = struct {
+    const Self = @This();
+
+    /// MMIO base address.
+    base: usize,
+
+    /// Register map.
+    const map = struct {
+        /// Redistributor Control Register.
+        const ctlr = 0x0000;
+        /// Redistributor Wake Register.
+        const waker = 0x0014;
+    };
+
+    /// GICR_CTLR.
+    const Ctlr = packed struct(u32) {
+        /// LPI support.
+        enable_lpis: bool,
+        /// Clear Enable Supported.
+        ces: bool,
+        /// LPI invalidate registers supported.
+        ir: bool,
+        /// Register Write Pending (RO).
+        rwp: bool,
+        /// Reserved.
+        _reserved0: u20 = 0,
+        /// Disable Processor selection for Group 0 interrupts.
+        dpg0: bool,
+        /// Disable Processor selection for Group 1 Non-secure interrupts.
+        dpg1ns: bool,
+        /// Disable Processor selection for Group 1 Secure interrupts.
+        dpg1s: bool,
+        /// Reserved.
+        _reserved1: u4 = 0,
+        /// Upstream Write Pending (RO).
+        uwp: bool,
+    };
+
+    /// GICR_WAKER.
+    ///
+    /// Permits software to control the behavior of the WakeRequest power management signal.
+    const Waker = packed struct(u32) {
+        /// Implementation Defined.
+        impl_defined0: bool,
+        /// Processor Sleep.
+        ps: bool,
+        /// ChildrenAsleep.
+        ca: bool,
+        /// Reserved.
+        _reserved: u28 = 0,
+        /// Implementation Defined.
+        impl_defined1: bool,
+    };
+
+    /// Initialize the redistributor.
+    pub fn init(self: Self) void {
+        // Set system registers and check if it's supported.
+        var iccsre = am.mrs(.icc_sre_el2);
+        iccsre.sre = true;
+        am.msr(.icc_sre_el2, iccsre);
+        if (!am.mrs(.icc_sre_el2).sre) {
+            @panic("GICv3: ICC_SRE_EL2 is not supported");
+        }
+
+        // Wait until processor gets out of sleep.
+        self.waitRwp();
+        var waker = self.read(self.base + map.waker, Waker);
+        waker.ps = false;
+        self.write(self.base + map.waker, waker);
+        while (self.read(self.base + map.waker, Waker).ca) {
+            std.atomic.spinLoopHint();
+        }
+
+        // Set mask and binary point.
+        Self.setPriorityMask(self, 0xFF);
+        Self.setBinaryPoint(self, 3);
+
+        // Enable Group 1 interrupt.
+        const igrpen1 = std.mem.zeroInit(regs.IccIgrpen1El1, .{
+            .enable = true,
+        });
+        am.msr(.icc_igrpen1_el1, igrpen1);
+    }
+
+    /// Set priority mask.
+    pub fn setPriorityMask(_: Self, prio: Priority) void {
+        const pmr = std.mem.zeroInit(regs.IccPmr, .{
+            .priority = prio,
+        });
+        am.msr(.icc_pmr_el1, pmr);
+    }
+
+    /// Set binary point.
+    pub fn setBinaryPoint(_: Self, value: u3) void {
+        const bpr = std.mem.zeroInit(regs.IccBpr, .{
+            .bpr = value,
+        });
+        am.msr(.icc_bpr1_el1, bpr);
+    }
+
+    /// Write to a register.
+    fn write(self: Self, offset: usize, value: anytype) void {
+        switch (@bitSizeOf(@TypeOf(value))) {
+            32 => @as(*volatile u32, @ptrFromInt(self.base + offset)).* = @bitCast(value),
+            64 => @as(*volatile u64, @ptrFromInt(self.base + offset)).* = @bitCast(value),
+            else => unreachable,
+        }
+    }
+
+    /// Read from a register.
+    fn read(self: Self, offset: usize, T: type) T {
+        const value = @as(*volatile u32, @ptrFromInt(self.base + offset)).*;
+        return @bitCast(value);
+    }
+
+    /// Block until the RWP bit is cleared.
+    fn waitRwp(self: Self) void {
+        while (self.read(map.ctlr, Ctlr).rwp) {
+            std.atomic.spinLoopHint();
+        }
+    }
+};
+
+// =============================================================
+// Imports
+// =============================================================
+
+const std = @import("std");
+const hugin = @import("hugin");
+const am = @import("asm.zig");
+const regs = @import("registers.zig");
