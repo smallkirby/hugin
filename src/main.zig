@@ -130,6 +130,16 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
         try hugin.serial.enableIntr(@intCast(inum));
     }
 
+    // Setup virtio-blk device.
+    log.info("Setting up virtio-blk device...", .{});
+    {
+        const vblk = try setupVirtioBlk(dtb) orelse {
+            log.warn("No virtio-blk device found.", .{});
+            return error.NoVirtioBlkDevice;
+        };
+        _ = vblk;
+    }
+
     // Setup hypervisor configuration.
     {
         const hcr_el2 = std.mem.zeroInit(hugin.arch.regs.HcrEl2, .{
@@ -272,6 +282,25 @@ fn setupMemory(dtb: hugin.dtb.Dtb, elf: usize, sp: usize) !void {
         reserveds[0..num_reserveds],
         log.info,
     );
+}
+
+/// Find and setup Virtio block device.
+fn setupVirtioBlk(dtb: hugin.dtb.Dtb) !?hugin.drivers.VirtioBlk {
+    var cur: ?hugin.dtb.Node = null;
+    while (true) {
+        cur = try dtb.searchNode(
+            .{ .compat = "virtio,mmio" },
+            cur,
+        ) orelse return null;
+
+        if (!try dtb.isNodeOperational(cur.?)) {
+            continue;
+        }
+
+        const reg = try dtb.readRegProp(cur.?, 0) orelse continue;
+        log.debug("Found virtio over MMIO candidate @ 0x{X}.", .{reg.addr});
+        return hugin.drivers.VirtioBlk.new(reg.addr) catch continue;
+    }
 }
 
 fn getAvailMemory(dtb: hugin.dtb.Dtb) !hugin.mem.PhysRegion {

@@ -48,7 +48,7 @@ pub const Dtb = struct {
     ///
     /// If `current` is not `null`, search starts from the given node.
     pub fn searchNode(self: Dtb, option: SearchOption, current: ?Node) DtbError!?Node {
-        var parser = Parser.new(self.header, current);
+        var parser = try Parser.new(self.header, current, true);
 
         while (!parser.isEmpty()) {
             if (try parser.search(option)) |found| {
@@ -59,7 +59,7 @@ pub const Dtb = struct {
 
     /// Read the register value at the given index from the `reg` property of the node.
     pub fn readRegProp(self: Dtb, node: Node, index: usize) DtbError!?hugin.mem.PhysRegion {
-        var parser = Parser.new(self.header, node);
+        var parser = try Parser.new(self.header, node, false);
         const reg = try parser.getProp("reg") orelse return null;
 
         const offset = (reg.addr_cells + reg.size_cells) * @sizeOf(u32) * index;
@@ -86,13 +86,13 @@ pub const Dtb = struct {
 
     /// Get a property value by name within the given node.
     pub fn getProp(self: Dtb, node: Node, name: []const u8) DtbError!?Property {
-        var parser = Parser.new(self.header, node);
+        var parser = try Parser.new(self.header, node, false);
         return try parser.getProp(name);
     }
 
     /// Check if the node is marked as "okay" in the `status` property.
     pub fn isNodeOperational(self: *const Dtb, node: Node) DtbError!bool {
-        var parser = Parser.new(self.header, node);
+        var parser = try Parser.new(self.header, node, false);
         const status = try parser.getProp("status") orelse return true;
 
         var iter = Parser.StringIter.new(status.addr, status.len);
@@ -138,18 +138,26 @@ const Parser = struct {
     const prop_size_cells = "#size-cells";
     const prop_compat = "compatible";
 
-    pub fn new(header: *const FdtHeader, current: ?Node) Parser {
-        const ptr = if (current) |cur| cur.addr else header.structAddr();
-        const state = if (current) |cur| State{
-            .addr_cells = cur.addr_cells,
-            .size_cells = cur.size_cells,
-        } else State{};
+    pub fn new(header: *const FdtHeader, current: ?Node, skip: bool) DtbError!Parser {
+        if (current) |cur| {
+            var parser = Parser{
+                .header = header,
+                .ptr = cur.addr,
+                .state = State{
+                    .addr_cells = cur.addr_cells,
+                    .size_cells = cur.size_cells,
+                },
+            };
+            if (skip) try parser.skipToNextNode();
 
-        return Parser{
-            .header = header,
-            .ptr = ptr,
-            .state = state,
-        };
+            return parser;
+        } else {
+            return Parser{
+                .header = header,
+                .ptr = header.structAddr(),
+                .state = State{},
+            };
+        }
     }
 
     /// Find a node with the given search option.
@@ -340,6 +348,34 @@ const Parser = struct {
         self.ptr = bits.roundup(self.ptr, token_align);
     }
 
+    /// Skip to the end of the current node.
+    fn skipToNextNode(self: *Parser) DtbError!void {
+        while (true) {
+            try self.consumeNop();
+
+            switch (Token.from(try self.consumeChunk())) {
+                // Begins new child node.
+                .begin_node => try self.skipToNextNode(),
+
+                // End of the current node.
+                .end_node => return,
+
+                // End of data.
+                .end => return DtbError.UnexpectedEof,
+
+                // Property
+                .prop => {
+                    const len = try self.consumeU32();
+                    _ = try self.consumeU32(); // nameoff
+                    self.ptr += len;
+                },
+
+                // Unhandled tokens.
+                else => return error.UnexpectedToken,
+            }
+        }
+    }
+
     /// Iterator over a null-terminated strings.
     const StringIter = struct {
         ptr: [*]const u8,
@@ -451,7 +487,7 @@ const FdtHeader = extern struct {
 };
 
 /// DTB node.
-const Node = struct {
+pub const Node = struct {
     /// Address of the beginning of the node in the structure block.
     addr: usize,
     /// The number of cells to represent the address in the `reg` property.
