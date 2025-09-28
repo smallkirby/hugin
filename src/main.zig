@@ -87,7 +87,20 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
 
     // Setup interrupts.
     {
-        hugin.arch.initInterrupts();
+        const gic_node = try dtb.searchNode(
+            .{ .compat = "arm,gic-v3" },
+            null,
+        ) orelse {
+            return error.SearchGicNode;
+        };
+        const dist_reg = try dtb.readRegProp(gic_node, 0) orelse {
+            return error.NoRegProperty;
+        };
+        const redist_reg = try dtb.readRegProp(gic_node, 1) orelse {
+            return error.NoRegProperty;
+        };
+
+        hugin.arch.initInterrupts(dist_reg, redist_reg);
     }
 
     // Setup hypervisor configuration.
@@ -95,7 +108,10 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
         const hcr_el2 = std.mem.zeroInit(hugin.arch.regs.HcrEl2, .{
             .rw = true, // Aarch64
             .api = true, // Disable PAuth.
-            .vm = true,
+            .vm = true, // Enable virtualization.
+            .fmo = true, // Enable FIQ routing.
+            .imo = true, // Enable IRQ routing.
+            .amo = true, // Enable SError routing.
         });
         hugin.arch.am.msr(.hcr_el2, hcr_el2);
     }

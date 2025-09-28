@@ -819,6 +819,16 @@ pub const Mpidr = packed struct(u64) {
         const value = @as(u64, @bitCast(self));
         return value & 0x0000_00FF_00FF_FFFF;
     }
+
+    /// Get the packed affinity value as a u32.
+    pub fn packedAffinity(self: Mpidr) u32 {
+        return hugin.bits.concatMany(u32, .{
+            self.aff3,
+            self.aff2,
+            self.aff1,
+            self.aff0,
+        });
+    }
 };
 
 /// ICC_SRE_ELx.

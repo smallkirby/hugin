@@ -58,7 +58,7 @@ pub const Dtb = struct {
     }
 
     /// Read the register value at the given index from the `reg` property of the node.
-    pub fn readRegProp(self: Dtb, node: Node, index: usize) DtbError!?Reg {
+    pub fn readRegProp(self: Dtb, node: Node, index: usize) DtbError!?hugin.mem.PhysRegion {
         var parser = Parser.new(self.header, node);
         const reg = try parser.getProp("reg") orelse return null;
 
@@ -466,12 +466,6 @@ const Property = struct {
     len: u32,
 };
 
-/// `reg` property value.
-const Reg = struct {
-    addr: usize,
-    size: usize,
-};
-
 // =============================================================
 // Tests
 // =============================================================
@@ -566,11 +560,11 @@ test "Parser.reg" {
     }, node);
 
     // Read "reg" property.
-    try testing.expectEqual(Reg{
+    try testing.expectEqual(hugin.mem.PhysRegion{
         .addr = 0x5678AB9012340000,
         .size = 0xDE00,
     }, try dtb.readRegProp(node.?, 0));
-    try testing.expectEqual(Reg{
+    try testing.expectEqual(hugin.mem.PhysRegion{
         .addr = 0xABCDEF0034000000,
         .size = 0x90,
     }, try dtb.readRegProp(node.?, 1));

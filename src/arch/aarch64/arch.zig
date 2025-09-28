@@ -10,8 +10,15 @@ pub fn initPaging(ipa: usize, pa: usize, size: usize, pallocator: PageAllocator)
 }
 
 /// Initialize interrupts for EL2.
-pub fn initInterrupts() void {
+pub fn initInterrupts(dist_base: PhysRegion, redist_base: PhysRegion) void {
+    // Set handlers.
     isr.init();
+
+    // Initialize GIC distributor and redistributor.
+    const dist = gicv3.Distributor.new(dist_base);
+    dist.init();
+    const redist = gicv3.Redistributor.new(redist_base);
+    redist.init();
 }
 
 /// Halt until interrupt.
@@ -38,6 +45,8 @@ pub inline fn getSp() usize {
 
 const hugin = @import("hugin");
 const PageAllocator = hugin.mem.PageAllocator;
+const PhysRegion = hugin.mem.PhysRegion;
 
+const gicv3 = @import("gicv3.zig");
 const isr = @import("isr.zig");
 const paging = @import("paging.zig");

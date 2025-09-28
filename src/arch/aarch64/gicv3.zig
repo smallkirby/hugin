@@ -6,7 +6,7 @@ pub const IntrId = u10;
 pub const Priority = u8;
 
 /// Provides the routing configuration for SPIs (Shared Peripheral Interrupts).
-const Distributor = struct {
+pub const Distributor = struct {
     const Self = @This();
 
     /// MMIO base address.
@@ -106,6 +106,11 @@ const Distributor = struct {
     /// GICD_IROUTER<n>.
     const Irouter = u64;
 
+    /// Create a new instance.
+    pub fn new(base: PhysRegion) Self {
+        return Self{ .base = base.addr };
+    }
+
     /// Initialize the distributor.
     pub fn init(self: Self) void {
         self.write(map.ctlr, std.mem.zeroInit(Ctlr, .{
@@ -123,7 +128,7 @@ const Distributor = struct {
     /// Set the priority of an interrupt.
     pub fn setPriority(self: Self, id: IntrId, prio: Priority) void {
         const reg_index = id / 4 * @sizeOf(Priority);
-        const reg_addr = self.base + map.ipriorityr + reg_index * @sizeOf(Ipriorityr);
+        const reg_addr = map.ipriorityr + reg_index * @sizeOf(Ipriorityr);
 
         var reg_value = self.read(reg_addr, Ipriorityr);
         switch (id % 4) {
@@ -143,7 +148,7 @@ const Distributor = struct {
         const nth = id % @bitSizeOf(Igroupr);
 
         // Set GICD_IGROUPR<n>.
-        const igroupr_addr = self.base + map.igroupr + reg_index * @sizeOf(Igroupr);
+        const igroupr_addr = map.igroupr + reg_index * @sizeOf(Igroupr);
         const igroupr = self.read(igroupr_addr, Igroupr);
         self.write(igroupr_addr, switch (group) {
             .secure_grp0, .secure_grp1 => hugin.bits.unset(igroupr, nth),
@@ -152,7 +157,7 @@ const Distributor = struct {
         });
 
         // Set GICD_IGRPMODR<n>.
-        const igrpmodr_addr = self.base + map.igrpmodr + reg_index * @sizeOf(Igrpmodr);
+        const igrpmodr_addr = map.igrpmodr + reg_index * @sizeOf(Igrpmodr);
         const igrpmodr = self.read(igrpmodr_addr, Igrpmodr);
         self.write(igrpmodr_addr, switch (group) {
             .secure_grp0, .ns_grp1 => hugin.bits.unset(igrpmodr, nth),
@@ -165,17 +170,17 @@ const Distributor = struct {
     pub fn setTrigger(self: Self, id: IntrId, trigger: Trigger) void {
         const reg_index = id / 16;
         const nth: u5 = @intCast((id % 16) * 2);
-        const icfgr_addr = self.base + map.icfgr + reg_index * @sizeOf(Icfgr);
+        const icfgr_addr = map.icfgr + reg_index * @sizeOf(Icfgr);
 
         const icfgr = self.read(icfgr_addr, Icfgr);
-        const new = (icfgr & ~(@as(Icfgr, 0b11) << nth)) | (@as(Icfgr, @intFromEnum(trigger)) << nth);
-        self.write(icfgr_addr, new);
+        const new_icfgr = (icfgr & ~(@as(Icfgr, 0b11) << nth)) | (@as(Icfgr, @intFromEnum(trigger)) << nth);
+        self.write(icfgr_addr, new_icfgr);
     }
 
     /// Set the routing of an interrupt to a specific affinity.
     pub fn setRouting(self: Self, id: IntrId, affinity: u64) void {
         const reg_index = id;
-        const irouter_addr = self.base + map.irouter + reg_index * @sizeOf(Irouter);
+        const irouter_addr = map.irouter + reg_index * @sizeOf(Irouter);
         self.write(irouter_addr, affinity);
     }
 
@@ -183,7 +188,7 @@ const Distributor = struct {
     pub fn enable(self: Self, id: IntrId) void {
         const reg_index = id / @bitSizeOf(Isenabler);
         const nth = id % @bitSizeOf(Isenabler);
-        const isenabler_addr = self.base + map.isenabler + reg_index * @sizeOf(Isenabler);
+        const isenabler_addr = map.isenabler + reg_index * @sizeOf(Isenabler);
 
         const isenabler = self.read(isenabler_addr, Isenabler);
         self.write(isenabler_addr, hugin.bits.set(isenabler, nth));
@@ -213,8 +218,11 @@ const Distributor = struct {
 };
 
 /// Provides the configuration settings for PPIs (Private Peripheral Interrupts) and SGIs (Software Generated Interrupts).
-const Redistributor = struct {
+pub const Redistributor = struct {
     const Self = @This();
+
+    /// Size in bytes of each Redistributor frame.
+    const mmio_size = 32 * hugin.mem.size_4kib;
 
     /// MMIO base address.
     base: usize,
@@ -223,6 +231,8 @@ const Redistributor = struct {
     const map = struct {
         /// Redistributor Control Register.
         const ctlr = 0x0000;
+        /// Redistributor Type Register.
+        const typer = 0x0008;
         /// Redistributor Wake Register.
         const waker = 0x0014;
     };
@@ -251,6 +261,38 @@ const Redistributor = struct {
         uwp: bool,
     };
 
+    /// GICR_TYPER.
+    ///
+    /// Provides information about the configuration of the redistributor.
+    const Typer = packed struct(u64) {
+        /// Whether the GIC implementation supports physical LPIs.
+        plpis: bool,
+        /// Whether the GIC implementation supports virtual LPIs.
+        vlpis: bool,
+        /// Dirty.
+        dirty: bool,
+        /// Whether this Redistributor supports direct injection of LPIs.
+        directlpis: bool,
+        /// Last Redistributor in the system.
+        last: bool,
+        /// Implementation Defined.
+        dpgs: bool,
+        /// Reserved.
+        mpam: u1 = 0,
+        /// Reserved.
+        rvpeid: u1 = 0,
+        /// Unique identifier for the PE.
+        pn: u16,
+        /// Indicates the scope of the CommonLPIAff group.
+        common_lapi_aff: u2,
+        /// Reserved.
+        vsgi: u1 = 0,
+        /// Reserved.
+        ppinum: u5 = 0,
+        /// ID of the PE associated with this Redistributor.
+        affinity: u32,
+    };
+
     /// GICR_WAKER.
     ///
     /// Permits software to control the behavior of the WakeRequest power management signal.
@@ -267,6 +309,29 @@ const Redistributor = struct {
         impl_defined1: bool,
     };
 
+    /// Create a new instance.
+    pub fn new(base: PhysRegion) Self {
+        const limit = base.addr + base.size;
+        const affinity = am.mrs(.mpidr_el1).packedAffinity();
+
+        var cur = base.addr;
+        var i: usize = 0;
+        while (cur < limit) : (cur += mmio_size) {
+            const r = Redistributor{ .base = cur };
+            const typer = r.read(map.typer, Typer);
+            if (typer.affinity == affinity) {
+                return r;
+            }
+            i += 1;
+
+            if (typer.last) {
+                break;
+            }
+        }
+
+        @panic("GICv3: No redistributor found for this CPU");
+    }
+
     /// Initialize the redistributor.
     pub fn init(self: Self) void {
         // Set system registers and check if it's supported.
@@ -279,10 +344,10 @@ const Redistributor = struct {
 
         // Wait until processor gets out of sleep.
         self.waitRwp();
-        var waker = self.read(self.base + map.waker, Waker);
+        var waker = self.read(map.waker, Waker);
         waker.ps = false;
-        self.write(self.base + map.waker, waker);
-        while (self.read(self.base + map.waker, Waker).ca) {
+        self.write(map.waker, waker);
+        while (self.read(map.waker, Waker).ca) {
             std.atomic.spinLoopHint();
         }
 
@@ -318,14 +383,17 @@ const Redistributor = struct {
         switch (@bitSizeOf(@TypeOf(value))) {
             32 => @as(*volatile u32, @ptrFromInt(self.base + offset)).* = @bitCast(value),
             64 => @as(*volatile u64, @ptrFromInt(self.base + offset)).* = @bitCast(value),
-            else => unreachable,
+            else => @compileError("gicv3.write: Invalid register size"),
         }
     }
 
     /// Read from a register.
     fn read(self: Self, offset: usize, T: type) T {
-        const value = @as(*volatile u32, @ptrFromInt(self.base + offset)).*;
-        return @bitCast(value);
+        return @bitCast(switch (@bitSizeOf(T)) {
+            32 => @as(*volatile u32, @ptrFromInt(self.base + offset)).*,
+            64 => @as(*volatile u64, @ptrFromInt(self.base + offset)).*,
+            else => @compileError("gicv3.read: Invalid register size"),
+        });
     }
 
     /// Block until the RWP bit is cleared.
@@ -344,3 +412,4 @@ const std = @import("std");
 const hugin = @import("hugin");
 const am = @import("asm.zig");
 const regs = @import("registers.zig");
+const PhysRegion = hugin.mem.PhysRegion;
