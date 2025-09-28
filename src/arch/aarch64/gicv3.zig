@@ -315,14 +315,12 @@ pub const Redistributor = struct {
         const affinity = am.mrs(.mpidr_el1).packedAffinity();
 
         var cur = base.addr;
-        var i: usize = 0;
         while (cur < limit) : (cur += mmio_size) {
             const r = Redistributor{ .base = cur };
             const typer = r.read(map.typer, Typer);
             if (typer.affinity == affinity) {
                 return r;
             }
-            i += 1;
 
             if (typer.last) {
                 break;
