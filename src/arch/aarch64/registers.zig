@@ -36,6 +36,8 @@ pub const SystemReg = enum {
     icc_bpr0_el1,
     icc_bpr1_el1,
     icc_igrpen1_el1,
+    icc_iar1_el1,
+    icc_eoir1_el1,
 
     /// Get the string representation of the system register.
     pub fn str(comptime self: SystemReg) []const u8 {
@@ -63,8 +65,46 @@ pub const SystemReg = enum {
             .icc_pmr_el1 => IccPmr,
             .icc_bpr0_el1, .icc_bpr1_el1 => IccBpr,
             .icc_igrpen1_el1 => IccIgrpen1El1,
+            .icc_iar1_el1 => IccIar1El1,
+            .icc_eoir1_el1 => IccEoir1El1,
         };
     }
+};
+
+/// Register context.
+pub const Context = extern struct {
+    x0: u64,
+    x1: u64,
+    x2: u64,
+    x3: u64,
+    x4: u64,
+    x5: u64,
+    x6: u64,
+    x7: u64,
+    x8: u64,
+    x9: u64,
+    x10: u64,
+    x11: u64,
+    x12: u64,
+    x13: u64,
+    x14: u64,
+    x15: u64,
+    x16: u64,
+    x17: u64,
+    x18: u64,
+    x19: u64,
+    x20: u64,
+    x21: u64,
+    x22: u64,
+    x23: u64,
+    x24: u64,
+    x25: u64,
+    x26: u64,
+    x27: u64,
+    x28: u64,
+    x29: u64,
+    x30: u64,
+    _pad: u64,
 };
 
 /// CurrentEL.
@@ -875,6 +915,27 @@ pub const IccIgrpen1El1 = packed struct(u64) {
     enable: bool,
     /// Reserved.
     _reserved: u63 = 0,
+};
+
+/// ICC_IAR1_EL1
+///
+/// The PE reads this register to obtain the INTID of the signaled Group 1 interrupt.
+/// This read acts as an acknowledge for the interrupt.
+pub const IccIar1El1 = packed struct(u64) {
+    /// The INTID of the signaled interrupt.
+    intid: u24,
+    /// Reserved.
+    _reserved: u40 = 0,
+};
+
+/// ICC_EOIR1_EL1.
+///
+/// A PE writes to this register to inform the CPU interface that it has completed the processing of the interrupt.
+pub const IccEoir1El1 = packed struct(u64) {
+    /// The INTID from the corresponding IAR.
+    intid: u24,
+    /// Reserved.
+    _reserved: u40 = 0,
 };
 
 // =============================================================

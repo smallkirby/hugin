@@ -1,7 +1,11 @@
 pub const Error = paging.PagingError;
 
 pub const am = @import("asm.zig"); // TODO: should not be exported.
+pub const gicv3 = @import("gicv3.zig"); // TODO: should not be exported.
 pub const regs = @import("registers.zig"); // TODO: should not be exported.
+
+/// Register context.
+pub const Context = regs.Context;
 
 /// Initialize paging.
 pub fn initPaging(ipa: usize, pa: usize, size: usize, pallocator: PageAllocator) Error!void {
@@ -10,7 +14,7 @@ pub fn initPaging(ipa: usize, pa: usize, size: usize, pallocator: PageAllocator)
 }
 
 /// Initialize interrupts for EL2.
-pub fn initInterrupts(dist_base: PhysRegion, redist_base: PhysRegion) void {
+pub fn initInterrupts(dist_base: PhysRegion, redist_base: PhysRegion) struct { gicv3.Distributor, gicv3.Redistributor } {
     // Set handlers.
     isr.init();
 
@@ -19,6 +23,18 @@ pub fn initInterrupts(dist_base: PhysRegion, redist_base: PhysRegion) void {
     dist.init();
     const redist = gicv3.Redistributor.new(redist_base);
     redist.init();
+
+    return .{ dist, redist };
+}
+
+/// Configure GIC to enable an interrupt.
+pub fn enableIntr(id: hugin.intr.IntrId, dist: gicv3.Distributor) void {
+    dist.setGroup(id, .ns_grp1);
+    dist.setPriority(id, 0);
+    dist.setRouting(id, @bitCast(am.mrs(.mpidr_el1)));
+    dist.setTrigger(id, .level);
+    dist.clearPending(id);
+    dist.enable(id);
 }
 
 /// Halt until interrupt.
@@ -47,6 +63,5 @@ const hugin = @import("hugin");
 const PageAllocator = hugin.mem.PageAllocator;
 const PhysRegion = hugin.mem.PhysRegion;
 
-const gicv3 = @import("gicv3.zig");
 const isr = @import("isr.zig");
 const paging = @import("paging.zig");

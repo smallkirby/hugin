@@ -2,6 +2,7 @@ pub const arch = @import("arch.zig").impl;
 pub const bits = @import("bits.zig");
 pub const drivers = @import("drivers.zig");
 pub const dtb = @import("dtb.zig");
+pub const intr = @import("intr.zig");
 pub const klog = @import("klog.zig");
 pub const mem = @import("mem.zig");
 pub const mmio = @import("mmio.zig");

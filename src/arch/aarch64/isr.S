@@ -109,7 +109,7 @@ irq_lowerel_a64:
   stp  x0,  x1, [sp, #( 0 * 16)]
   mov  x0, sp
   adr x30, exit_exception
-  b   syncHandler
+  b   irqHandler
 
 # FIQ and vFIQ, Lower Exception level with AArch64.
 .balign 0x80

@@ -1,10 +1,5 @@
 //! GIC, Generic Interrupt Controller version 3
 
-/// Interrupt ID.
-pub const IntrId = u10;
-/// Interrupt Priority.
-pub const Priority = u8;
-
 /// Provides the routing configuration for SPIs (Shared Peripheral Interrupts).
 pub const Distributor = struct {
     const Self = @This();
@@ -16,6 +11,8 @@ pub const Distributor = struct {
     const map = struct {
         /// Distributor Control Register.
         const ctlr = 0x0000;
+        /// Interrupt Group Registers.
+        const igroupr = 0x0080;
         /// Interrupt Set-Enable Registers.
         const isenabler = 0x0100;
         /// Interrupt Priority Registers.
@@ -24,8 +21,10 @@ pub const Distributor = struct {
         const icfgr = 0x0C00;
         /// Interrupt Group Modifier Registers.
         const igrpmodr = 0x0D00;
-        /// Interrupt Group Registers.
-        const igroupr = 0x1000;
+        /// Interrupt Set-Pending Registers.
+        const ispendr = 0x0200;
+        /// Interrupt Clear-Pending Registers.
+        const icpendr = 0x0280;
         /// Interrupt Routing Registers.
         const irouter = 0x6000;
     };
@@ -106,6 +105,16 @@ pub const Distributor = struct {
     /// GICD_IROUTER<n>.
     const Irouter = u64;
 
+    /// GICD_ISPENDR<n>.
+    ///
+    /// Adds the pending state to the corresponding interrupt.
+    const Ispendr = u32;
+
+    /// GICD_ICPENDR<n>.
+    ///
+    /// Removes the pending state of the corresponding interrupt.
+    const Icpendr = u32;
+
     /// Create a new instance.
     pub fn new(base: PhysRegion) Self {
         return Self{ .base = base.addr };
@@ -127,7 +136,7 @@ pub const Distributor = struct {
 
     /// Set the priority of an interrupt.
     pub fn setPriority(self: Self, id: IntrId, prio: Priority) void {
-        const reg_index = id / 4 * @sizeOf(Priority);
+        const reg_index: usize = id / 4 * @sizeOf(Priority);
         const reg_addr = map.ipriorityr + reg_index * @sizeOf(Ipriorityr);
 
         var reg_value = self.read(reg_addr, Ipriorityr);
@@ -144,7 +153,7 @@ pub const Distributor = struct {
 
     /// Set the interrupt group of an interrupt.
     pub fn setGroup(self: Self, id: IntrId, group: Group) void {
-        const reg_index = id / @bitSizeOf(Igroupr);
+        const reg_index: usize = id / @bitSizeOf(Igroupr);
         const nth = id % @bitSizeOf(Igroupr);
 
         // Set GICD_IGROUPR<n>.
@@ -168,7 +177,7 @@ pub const Distributor = struct {
 
     /// Set the trigger type of an interrupt.
     pub fn setTrigger(self: Self, id: IntrId, trigger: Trigger) void {
-        const reg_index = id / 16;
+        const reg_index: usize = id / 16;
         const nth: u5 = @intCast((id % 16) * 2);
         const icfgr_addr = map.icfgr + reg_index * @sizeOf(Icfgr);
 
@@ -179,9 +188,29 @@ pub const Distributor = struct {
 
     /// Set the routing of an interrupt to a specific affinity.
     pub fn setRouting(self: Self, id: IntrId, affinity: u64) void {
-        const reg_index = id;
+        const reg_index: usize = id;
         const irouter_addr = map.irouter + reg_index * @sizeOf(Irouter);
         self.write(irouter_addr, affinity);
+    }
+
+    /// Set an interrupt as pending.
+    pub fn setPending(self: Self, id: IntrId) void {
+        const reg_index = id / @bitSizeOf(Ispendr);
+        const nth = id % @bitSizeOf(Ispendr);
+        const ispendr_addr = map.ispendr + reg_index * @sizeOf(Ispendr);
+
+        const ispendr = self.read(ispendr_addr, Ispendr);
+        self.write(ispendr_addr, hugin.bits.set(ispendr, nth));
+    }
+
+    /// Clear the pending state of an interrupt.
+    pub fn clearPending(self: Self, id: IntrId) void {
+        const reg_index = id / @bitSizeOf(Icpendr);
+        const nth = id % @bitSizeOf(Icpendr);
+        const icpendr_addr = map.icpendr + reg_index * @sizeOf(Icpendr);
+
+        const icpendr = self.read(icpendr_addr, Icpendr);
+        self.write(icpendr_addr, hugin.bits.set(icpendr, nth));
     }
 
     /// Enable an interrupt.
@@ -410,4 +439,7 @@ const std = @import("std");
 const hugin = @import("hugin");
 const am = @import("asm.zig");
 const regs = @import("registers.zig");
+
+const IntrId = hugin.intr.IntrId;
+const Priority = hugin.intr.Priority;
 const PhysRegion = hugin.mem.PhysRegion;

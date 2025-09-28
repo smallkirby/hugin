@@ -70,6 +70,7 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
     }
 
     // Initialize paging.
+    log.info("Setting up paging...", .{});
     {
         const memory = try getAvailMemory(dtb);
         log.debug("Mapping IPA to PA: 0x{X} -> 0x{X} (size: 0x{X})", .{
@@ -86,6 +87,7 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
     }
 
     // Setup interrupts.
+    log.info("Setting up interrupts...", .{});
     {
         const gic_node = try dtb.searchNode(
             .{ .compat = "arm,gic-v3" },
@@ -100,7 +102,32 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
             return error.NoRegProperty;
         };
 
-        hugin.arch.initInterrupts(dist_reg, redist_reg);
+        hugin.intr.init(dist_reg, redist_reg);
+    }
+
+    // Enable PL011 interrupt.
+    log.info("Enabling PL011 interrupt...", .{});
+    {
+        const pl011_node = try dtb.searchNode(
+            .{ .compat = "arm,pl011" },
+            null,
+        ) orelse {
+            return error.SearchPl011Node;
+        };
+        const intr_prop = try dtb.getProp(pl011_node, "interrupts") orelse {
+            return error.NoInterruptsProperty;
+        };
+        const prop_data = intr_prop.slice();
+
+        const valid =
+            hugin.bits.fromBigEndian(prop_data[0]) == 0 // interrupt kind: SPI
+            and hugin.bits.fromBigEndian(prop_data[2]) == 4 // trigger type: level
+        ;
+        const inum = if (valid) hugin.bits.fromBigEndian(prop_data[1]) else {
+            return error.InvalidPl011IntrProp;
+        };
+
+        try hugin.serial.enableIntr(@intCast(inum));
     }
 
     // Setup hypervisor configuration.

@@ -84,6 +84,12 @@ pub const Dtb = struct {
         return .{ .addr = addr, .size = size };
     }
 
+    /// Get a property value by name within the given node.
+    pub fn getProp(self: Dtb, node: Node, name: []const u8) DtbError!?Property {
+        var parser = Parser.new(self.header, node);
+        return try parser.getProp(name);
+    }
+
     /// Check if the node is marked as "okay" in the `status` property.
     pub fn isNodeOperational(self: *const Dtb, node: Node) DtbError!bool {
         var parser = Parser.new(self.header, node);
@@ -464,6 +470,11 @@ const Property = struct {
     size_cells: u32,
     /// The length of the property value in bytes.
     len: u32,
+
+    /// Get the raw value as a byte slice.
+    pub fn slice(self: Property) []const u32 {
+        return @as([*]const u32, @ptrFromInt(self.addr))[0 .. self.len / @sizeOf(u32)];
+    }
 };
 
 // =============================================================

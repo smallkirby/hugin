@@ -7,6 +7,17 @@ pub fn init(pl011: Pl011) void {
     initialized = true;
 }
 
+/// Enable interrupt.
+pub fn enableIntr(id: hugin.intr.IntrId) hugin.intr.IntrError!void {
+    hugin.rtt.expect(initialized);
+
+    // Enable GIC interrupt for PL011.
+    try hugin.intr.enable(id, .spi, &handler);
+
+    // Enable PL011 interrupt.
+    serial.enableIntr();
+}
+
 /// Check if the default serial console is initialized.
 pub fn isInitialized() bool {
     return initialized;
@@ -22,6 +33,11 @@ pub fn writeString(s: []const u8) void {
     for (s) |c| {
         write(c);
     }
+}
+
+/// IRQ handler for serial device.
+fn handler(_: *hugin.arch.Context) void {
+    _ = serial.getc();
 }
 
 // =============================================================
