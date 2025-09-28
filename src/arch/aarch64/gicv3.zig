@@ -350,8 +350,8 @@ pub const Redistributor = struct {
         }
 
         // Set mask and binary point.
-        Self.setPriorityMask(self, 0xFF);
-        Self.setBinaryPoint(self, 3);
+        self.setPriorityMask(0xFF);
+        self.setBinaryPoint(3);
 
         // Enable Group 1 interrupt.
         const igrpen1 = std.mem.zeroInit(regs.IccIgrpen1El1, .{
