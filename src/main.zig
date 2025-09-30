@@ -299,7 +299,7 @@ fn setupVirtioBlk(dtb: hugin.dtb.Dtb) !?hugin.drivers.VirtioBlk {
 
         const reg = try dtb.readRegProp(cur.?, 0) orelse continue;
         log.debug("Found virtio over MMIO candidate @ 0x{X}.", .{reg.addr});
-        return hugin.drivers.VirtioBlk.new(reg.addr) catch continue;
+        return hugin.drivers.VirtioBlk.new(reg.addr, hugin.mem.page_allocator) catch continue;
     }
 }
 

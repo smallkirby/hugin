@@ -3,17 +3,26 @@
 const Self = @This();
 const VirtioBlk = Self;
 
+pub const Error = VirtioBlkError;
 pub const VirtioBlkError = error{
     /// Invalid virtio device.
     InvalidDevice,
-};
-const Error = VirtioBlkError;
+} || PageAllocator.Error;
 
 /// Device ID of Virtio Block Device.
 const id_virtio_blk: u32 = 0x2;
 
+/// Base address of MMIO Virtio Block Device.
+base: usize,
+/// Descriptor Table.
+desc_table: *[virtio.num_descs]virtio.QueueDesc,
+/// Available Ring.
+qavail: *virtio.QueueAvail,
+/// Used Ring.
+qused: *virtio.QueueUsed,
+
 /// Create a new Virtio Block Device driver instance.
-pub fn new(base: usize) Error!Self {
+pub fn new(base: usize, pallocator: PageAllocator) Error!Self {
     const vreg = virtio.Register.from(base);
 
     // Check device identity.
@@ -43,7 +52,38 @@ pub fn new(base: usize) Error!Self {
     vreg.write(.gfeats, 0);
     vreg.write(.status, vreg.read(.status) | virtio.Register.Status.features_ok);
 
-    hugin.unimplemented("VirtioBlk.new()");
+    // Setup VirtQueue.
+    vreg.write(.gpage_size, virtio.page_size);
+    vreg.write(.queue_sel, 0);
+
+    if (virtio.num_descs > vreg.read(.queue_size_max)) {
+        return Error.InvalidDevice;
+    }
+    vreg.write(.queue_size, virtio.num_descs);
+
+    const queue = try pallocator.allocPages(virtio.queue_size / hugin.mem.page_size);
+    errdefer pallocator.freePages(queue);
+    @memset(queue, 0);
+    vreg.write(.queue_pfn, @intCast(hugin.mem.virt2phys(queue) >> hugin.mem.page_shift));
+
+    // Notify setup complete.
+    vreg.write(.status, vreg.read(.status) | virtio.Register.Status.driver_ok);
+
+    // Calculate pointers.
+    const qptr = @intFromPtr(queue.ptr);
+    const desc_table: *[virtio.num_descs]virtio.QueueDesc = @ptrFromInt(qptr);
+    const qavail: *virtio.QueueAvail = @ptrFromInt(qptr + virtio.desc_table_size);
+    const qused: *virtio.QueueUsed = @ptrFromInt(hugin.bits.roundup(
+        qptr + virtio.desc_table_size + virtio.avail_ring_size,
+        virtio.page_size,
+    ));
+
+    return Self{
+        .base = base,
+        .desc_table = desc_table,
+        .qavail = qavail,
+        .qused = qused,
+    };
 }
 
 // =============================================================
@@ -52,5 +92,6 @@ pub fn new(base: usize) Error!Self {
 
 const std = @import("std");
 const hugin = @import("hugin");
+const PageAllocator = hugin.mem.PageAllocator;
 
 const virtio = @import("virtio.zig");

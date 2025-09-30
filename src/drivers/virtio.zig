@@ -71,6 +71,24 @@ pub const Register = struct {
     }
 };
 
+/// Guest page size.
+pub const page_size = 4096;
+/// Number of descriptors in a Virtqueue Available Ring and Used Ring.
+pub const num_descs = 64;
+
+/// Size in bytes of the Descriptor Table.
+pub const desc_table_size = @sizeOf(QueueDesc) * num_descs;
+/// Size in bytes of the Available Ring.
+pub const avail_ring_size = @sizeOf(QueueAvail);
+/// Size in bytes of the Used Ring.
+pub const used_ring_size = @sizeOf(QueueUsed);
+/// Memory size in bytes to allocate for a virtqueue.
+///
+/// Used Ring must be placed in the next page of the Available Ring.
+pub const queue_size =
+    hugin.bits.roundup(desc_table_size + avail_ring_size, page_size) +
+    hugin.bits.roundup(used_ring_size, page_size);
+
 /// Virtqueue Descriptor: Entry in the Descriptor Table.
 ///
 /// It refers to the buffers the driver is using for the device.
@@ -90,7 +108,7 @@ pub const QueueDesc = extern struct {
         /// Buffer is device write-only, indicating driver cant't write (otherwise device read-only).
         write: bool,
         /// Reserved.
-        _reserved: u16 = 0,
+        _reserved: u14 = 0,
     };
 };
 
@@ -98,9 +116,6 @@ pub const QueueDesc = extern struct {
 ///
 /// The driver uses this to offer buffers to the device.
 pub const QueueAvail = extern struct {
-    /// Number of descriptors in a Virtqueue Available Ring.
-    const num_descs = 64;
-
     /// Flags.
     flags: u16,
     /// Indicates where the driver would put the next descriptor entry in the ring.
@@ -115,9 +130,6 @@ pub const QueueAvail = extern struct {
 ///
 /// This is where the device returns buffers once it is done with them.
 pub const QueueUsed = extern struct {
-    /// Number of descriptors in a Virtqueue Used Ring.
-    const num_descs = 64;
-
     /// Flags.
     flags: u16,
     /// Indicates where the device would put the next descriptor entry in the ring.
@@ -140,3 +152,4 @@ pub const QueueUsed = extern struct {
 // =============================================================
 
 const std = @import("std");
+const hugin = @import("hugin");
