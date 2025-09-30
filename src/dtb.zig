@@ -555,7 +555,7 @@ test "Parser.nop" {
     defer testing.allocator.free(bin);
 
     const dtb = try Dtb.new(@intFromPtr(bin.ptr));
-    var parser = Parser.new(dtb.header, null);
+    var parser = try Parser.new(dtb.header, null, false);
 
     try parser.consumeNop();
     try testing.expectEqual([_]u8{ 0x00, 0x00, 0x00, 0x01 }, try parser.peekChunk());
