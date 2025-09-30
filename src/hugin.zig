@@ -1,4 +1,5 @@
 pub const arch = @import("arch.zig").impl;
+pub const bitmap = @import("bitmap.zig");
 pub const bits = @import("bits.zig");
 pub const drivers = @import("drivers.zig");
 pub const dtb = @import("dtb.zig");
@@ -74,6 +75,7 @@ pub fn endlessHalt() noreturn {
 // =============================================================
 
 test {
+    _ = bitmap;
     _ = bits;
     _ = dtb;
     _ = mem;

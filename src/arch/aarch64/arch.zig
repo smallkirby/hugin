@@ -55,6 +55,21 @@ pub inline fn getSp() usize {
     );
 }
 
+/// Invalidate data cache line by virtual address.
+pub fn invalidateCache(addr: anytype) void {
+    const a: usize = switch (@typeInfo(@TypeOf(addr))) {
+        .pointer => @intFromPtr(addr),
+        .int, .comptime_int => addr,
+        else => @compileError("Invalid argument."),
+    };
+
+    asm volatile (
+        \\dc ivac, %[addr]
+        :
+        : [addr] "r" (a),
+    );
+}
+
 // =============================================================
 // Imports
 // =============================================================

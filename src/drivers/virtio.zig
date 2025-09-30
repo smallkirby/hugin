@@ -100,13 +100,13 @@ pub const QueueDesc = extern struct {
     /// Flags
     flags: Flag,
     /// Next field index if flags has NEXT bit set.
-    next: u16,
+    next: u16 = 0,
 
     const Flag = packed struct(u16) {
         /// Buffer continues via the next field.
-        next: bool,
+        next: bool = false,
         /// Buffer is device write-only, indicating driver cant't write (otherwise device read-only).
-        write: bool,
+        write: bool = false,
         /// Reserved.
         _reserved: u14 = 0,
     };
@@ -124,6 +124,11 @@ pub const QueueAvail = extern struct {
     ring: [num_descs]u16,
     ///
     used_event: u16,
+
+    pub fn push(self: *QueueAvail, idx: u16) void {
+        self.ring[self.idx % num_descs] = idx;
+        self.idx +%= 1;
+    }
 };
 
 /// Virtqueue Used Ring.
