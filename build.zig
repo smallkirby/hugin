@@ -89,6 +89,12 @@ pub fn build(b: *std.Build) !void {
         "Path to QEMU install directory",
     ) orelse b.fmt("{s}/qemu-aarch64", .{home});
 
+    const use_vfat = b.option(
+        bool,
+        "vfat",
+        "Use QEMU Virtual FAT filesystem.",
+    ) orelse false;
+
     const is_runtime_test = b.option(
         bool,
         "runtime_test",
@@ -143,10 +149,10 @@ pub fn build(b: *std.Build) !void {
     // Initial image
     // =============================================================
 
-    const out_dir_name = "disk";
+    const vfatdir_name = "disk";
     const install_hugin = b.addInstallFile(
         hugin.getEmittedBin(),
-        b.fmt("{s}/{s}", .{ out_dir_name, hugin.name }),
+        b.fmt("{s}/{s}", .{ vfatdir_name, hugin.name }),
     );
     install_hugin.step.dependOn(&hugin.step);
     b.getInstallStep().dependOn(&install_hugin.step);
@@ -154,14 +160,32 @@ pub fn build(b: *std.Build) !void {
     const compile_scr = b.addSystemCommand(&[_][]const u8{
         "scripts/build_scr.sh",
         uboot_dir,
-        b.fmt("{s}/{s}/boot.scr", .{ b.install_path, out_dir_name }),
+        b.fmt("{s}/{s}/boot.scr", .{ b.install_path, vfatdir_name }),
     });
     b.getInstallStep().dependOn(&compile_scr.step);
     compile_scr.step.dependOn(&install_hugin.step);
 
+    const diskimg_name = "diskimg";
+    const build_fat32 = b.addSystemCommand(&[_][]const u8{
+        "scripts/create_disk.bash",
+        b.fmt("{s}/{s}", .{ b.install_path, vfatdir_name }), // copy source
+        b.fmt("{s}/{s}", .{ b.install_path, diskimg_name }), // output image
+    });
+    if (!use_vfat) b.getInstallStep().dependOn(&build_fat32.step);
+    build_fat32.step.dependOn(&compile_scr.step);
+    build_fat32.step.dependOn(&install_hugin.step);
+
     // =============================================================
     // Run QEMU
     // =============================================================
+
+    const fs = blk: {
+        if (use_vfat) {
+            break :blk b.fmt("fat:rw:{s}/{s}", .{ b.install_path, vfatdir_name });
+        } else {
+            break :blk b.fmt("{s}/{s}", .{ b.install_path, diskimg_name });
+        }
+    };
 
     const qemu_bin = b.fmt("{s}/bin/qemu-system-aarch64", .{qemu_dir});
     var qemu_args = std.array_list.Aligned([]const u8, null).empty;
@@ -179,7 +203,7 @@ pub fn build(b: *std.Build) !void {
         "-device",
         "virtio-blk-device,drive=disk",
         "-drive",
-        b.fmt("file=fat:rw:{s}/{s},format=raw,if=none,media=disk,id=disk", .{ b.install_path, out_dir_name }),
+        b.fmt("file={s},format=raw,if=none,media=disk,id=disk", .{fs}),
         "-nographic",
         "-serial",
         "mon:stdio",
@@ -213,7 +237,7 @@ pub fn build(b: *std.Build) !void {
         "-cpu",
         "cortex-a53",
         "-drive",
-        b.fmt("file=fat:rw:{s}/{s},format=raw,if=none,media=disk,id=disk", .{ b.install_path, out_dir_name }),
+        b.fmt("file=fat:rw:{s}/{s},format=raw,if=none,media=disk,id=disk", .{ b.install_path, vfatdir_name }),
         "-smp",
         "3",
     });

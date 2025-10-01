@@ -24,6 +24,7 @@ zig build test --summary all
 | `runtime_test` | Flag | Enable runtime tests. | `false` |
 | `uboot` | String | Path to U-Boot install directory. | `"$HOME/u-boot"` |
 | `qemu` | String | Path to QEMU aarch64 install directory. | `"$HOME/qemu-aarch64"` |
+| `vfat` | Flag | Use QEMU Virtual FAT filesystem. | `false` |
 | `wait_qemu` | Flag | Make QEMU wait for being attached by GDB. | `false` |
 
 ## License
