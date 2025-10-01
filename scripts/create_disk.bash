@@ -27,7 +27,7 @@ start_sector=2048
 size=
 type=0x0C # W95 FAT32 (LBA)
 boot="*"
-sfdisk "$out" <<EOF
+sfdisk "$out" 1>/dev/null <<EOF
   $start_sector,$size,$type,$boot
 EOF
 

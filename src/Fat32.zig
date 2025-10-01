@@ -372,7 +372,7 @@ fn new(vblk: *VirtioBlk, base: Lba, comptime lbasize: usize, palloc: PageAllocat
 
         @memset(namebuf[0..], 0);
         const name = try dent.getName(&namebuf);
-        log.debug("   {s} ({d} bytes)", .{ name, dent.size });
+        log.debug("   {s: <11} ({d} bytes)", .{ name, dent.size });
     }
 
     // TODO: implement

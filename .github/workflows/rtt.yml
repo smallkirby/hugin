@@ -41,6 +41,6 @@ jobs:
           zig build install \
             -Dlog_level=debug \
             -Doptimize=${{ matrix.BUILD_TYPE }} \
-            -Druntime_test=true \
+            -Druntime_test \
             -Duboot=$UBOOT
           bash ./scripts/runtime_test.bash --uboot $UBOOT

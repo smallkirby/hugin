@@ -11,7 +11,16 @@ MONITOR_SOCKET="/tmp/qemu-monitor-rtt-$$"
 
 # Success indicators.
 HEYSTACK=(
-  "[INFO ] main    | Switching to EL1h..."
+  # Hugin has booted.
+  "[INFO ] main    | Hello from EL#2"
+  # FAT32 filesystem has been parsed.
+  "[DEBUG] fat32   | Found FAT32 filesystem @ LBA=0x800"
+  "[DEBUG] fat32   |    OEM       : mkfs.fat"
+  "[DEBUG] fat32   |    Revision  : 0.0"
+  "[DEBUG] fat32   |    Root Clus : 2"
+  "[DEBUG] fat32   |    Bytes/sec : 512"
+  # Switch to EL1 has been done.
+  "[INFO ] main    | Hello from EL1!"
 )
 
 USE_SUDO=0
@@ -93,7 +102,7 @@ function main()
   qemu_print_version
 
   qemu_start \
-    "$(pwd)/zig-out/img" \
+    "$(pwd)/zig-out/diskimg" \
     "$MONITOR_SOCKET" \
     "$TMPFILE" \
     "$TIMEOUT" \

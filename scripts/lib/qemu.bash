@@ -40,7 +40,7 @@ function qemu_start()
     return 1
   fi
 
-  local efi_root_dir="$1"
+  local diskimg="$1"
   _qemu_monitor_socket="$2"
   local log_file="$3"
   _qemu_pidfile="$3.pid"
@@ -50,7 +50,7 @@ function qemu_start()
   local bios="$_uboot/u-boot.bin"
 
   echo_normal "Starting QEMU..."
-  echo_normal "  EFI directory  : $efi_root_dir"
+  echo_normal "  Disk image     : $diskimg"
   echo_normal "  Monitor socket : $_qemu_monitor_socket"
   echo_normal "  Log file       : $log_file"
   echo_normal "  PID file       : $_qemu_pidfile"
@@ -68,7 +68,7 @@ function qemu_start()
         -m "$MEMORY" \
         -nographic \
         -device virtio-blk-device,drive=disk \
-        -drive file=./zig-out/diskimg,format=raw,if=none,media=disk,id=disk \
+        -drive file="$diskimg",format=raw,if=none,media=disk,id=disk \
         -serial mon:stdio \
         -d guest_errors \
         -semihosting \

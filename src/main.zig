@@ -137,6 +137,8 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
             log.warn("No virtio-blk device found.", .{});
             return error.NoVirtioBlkDevice;
         };
+        log.info("Found the target MMIO virtio-blk device @ 0x{X}", .{vblk.vreg.base});
+
         const fat32 = try hugin.Fat32.from(&vblk, hugin.mem.page_allocator);
         _ = fat32;
     }
@@ -246,7 +248,7 @@ fn setupMemory(dtb: hugin.dtb.Dtb, elf: usize, sp: usize) !void {
         var iter = hdr.iterateProgramHeadersBuffer(elf_ptr[0..std.math.maxInt(usize)]);
         while (try iter.next()) |phdr| {
             if (phdr.p_type != std.elf.PT_LOAD) continue;
-            log.info("\t @ 0x{X:0>16} - 0x{X:0>16}", .{
+            log.info("       @ 0x{X:0>16} - 0x{X:0>16}", .{
                 phdr.p_paddr,
                 phdr.p_paddr + phdr.p_memsz,
             });
