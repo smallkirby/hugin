@@ -28,7 +28,7 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y \
-            curl wget tar xz-utils
+            curl wget tar xz-utils mtools
 
       - name: Install zig
         run: |
