@@ -109,6 +109,22 @@ pub fn new(base: usize, allocator: Allocator, pallocator: PageAllocator) Error!S
     };
 }
 
+/// Read data from the block device.
+///
+/// - `buffer`: The buffer to read to.
+/// - `addr`: The block address to read from.
+pub fn read(self: *Self, buffer: []u8, addr: u64) Error!void {
+    return self.operate(buffer, addr, .read);
+}
+
+/// Write data to the block device.
+///
+/// - `buffer`: The buffer to write from.
+/// - `addr`: The block address to write to.
+pub fn write(self: *Self, buffer: []const u8, addr: u64) Error!void {
+    return self.operate(buffer, addr, .write);
+}
+
 const Operation = enum {
     read,
     write,
@@ -119,7 +135,7 @@ const Operation = enum {
 /// - `buffer`: The buffer to read to or write from.
 /// - `addr`: The block address to read from or write to.
 /// - `op`: The operation to perform (read or write).
-pub fn operate(self: *Self, buffer: []u8, addr: u64, op: Operation) Error!void {
+fn operate(self: *Self, buffer: []u8, addr: u64, op: Operation) Error!void {
     if (addr & block_mask != 0) {
         return Error.InvalidAddress;
     }
