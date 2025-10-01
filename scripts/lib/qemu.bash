@@ -68,7 +68,7 @@ function qemu_start()
         -m "$MEMORY" \
         -nographic \
         -device virtio-blk-device,drive=disk \
-        -drive file=fat:rw:./zig-out/disk,format=raw,if=none,media=disk,id=disk \
+        -drive file=./zig-out/diskimg,format=raw,if=none,media=disk,id=disk \
         -serial mon:stdio \
         -d guest_errors \
         -semihosting \
