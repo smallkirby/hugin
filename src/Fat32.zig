@@ -6,7 +6,30 @@ pub const Error = error{
     InvalidBootSector,
     /// Target resource not found.
     NotFound,
-} || VirtioBlk.Error;
+    /// Invalid argument.
+    InvalidArgument,
+} || VirtioBlk.Error || PageAllocator.Error;
+
+/// Underlying Virtio Block Device.
+vblk: *VirtioBlk,
+/// Base LBA of the FAT32 filesystem.
+base: Lba,
+/// Block size in bytes of the underlying block device.
+lbasize: usize,
+/// Bytes per sector.
+bytes_per_sec: u16,
+/// Sectors per cluster.
+sec_per_clus: u8,
+/// Number of reserved sectors.
+rsvd_sec_cnt: u16,
+/// Size in sectors of one FAT.
+fat_sz32: u32,
+/// Number of FATs.
+num_fats: u8,
+/// Pointer to the first FAT.
+fat: []u8,
+/// Pointer to the root directory entries.
+rdents: []u8,
 
 /// Type of Logical Block Address.
 const Lba = u32;
@@ -155,15 +178,117 @@ const Bpb = extern struct {
     }
 };
 
+/// FAT32 Directory Entry.
+const DirEntry = extern struct {
+    /// Short name.
+    name: [8]u8 align(1),
+    /// Extension of the short name.
+    ext: [3]u8 align(1),
+    /// File attributes.
+    attr: Attr,
+    /// Reserved.
+    ntres: u8,
+    /// Millisecond stamp at file creation time (a count of tenths of a second).
+    crt_time_tenth: u8,
+    /// Time file was created.
+    crt_time: u16 align(1),
+    /// Date file was created.
+    crt_date: u16 align(1),
+    /// Last access date.
+    lstacc_date: u16 align(1),
+    /// High word of this entry's first cluster number.
+    fstclus_hi: u16 align(1),
+    /// Time of last write.
+    wrt_time: u16 align(1),
+    /// Date of last write.
+    wrt_date: u16 align(1),
+    /// Low word of this entry's first cluster number.
+    fstclus_lo: u16 align(1),
+    /// File size in bytes.
+    size: u32 align(1),
+
+    const Attr = packed struct(u8) {
+        /// Read Only.
+        read_only: bool,
+        /// Hidden.
+        hidden: bool,
+        /// System.
+        system: bool,
+        /// Volume ID.
+        volume_id: bool,
+        /// Directory.
+        directory: bool,
+        /// Archive.
+        archive: bool,
+        /// Reserved.
+        _reserved: u2 = 0,
+    };
+
+    /// Check if this entry is a long filename entry.
+    pub fn longname(self: DirEntry) bool {
+        const attr = self.attr;
+        return attr.read_only and attr.hidden and attr.system and attr.volume_id;
+    }
+
+    /// Check if this entry is free.
+    pub fn free(self: DirEntry) bool {
+        return self.name[0] == 0xE5;
+    }
+
+    /// Check if this entry is free and there're no allocated entries after this.
+    pub fn sentinel(self: DirEntry) bool {
+        return self.name[0] == 0x00;
+    }
+
+    /// Get the name of this entry.
+    pub fn getName(self: DirEntry, buf: []u8) Error![]const u8 {
+        if (self.longname()) {
+            return Error.InvalidArgument;
+        }
+
+        // Name part.
+        buf[0] = if (self.name[0] == 0x05) 0xE5 else self.name[0];
+        var cur: usize = 1;
+        for (self.name[1..]) |c| {
+            if (c == ' ') continue;
+            buf[cur] = c;
+            cur += 1;
+        }
+
+        // Extension part.
+        if (self.ext[0] != ' ') {
+            buf[cur] = '.';
+            cur += 1;
+        }
+        for (self.ext) |c| {
+            if (c == ' ') continue;
+            buf[cur] = c;
+            cur += 1;
+        }
+
+        return buf[0..cur];
+    }
+
+    comptime {
+        const size = @bitSizeOf(DirEntry);
+        const expected = 32 * @bitSizeOf(u8);
+        hugin.comptimeAssert(
+            size == expected,
+            "Invalid size of DirEntry: expected {d} bits, found {d} bits",
+            .{ expected, size },
+        );
+    }
+};
+
 /// Find a FAT32 filesystem from the given Virtio Block Device.
-pub fn from(vblk: *VirtioBlk) Error!Self {
+pub fn from(vblk: *VirtioBlk, palloc: PageAllocator) Error!Self {
     const start_lba = try Mbr.getPartition(vblk, .fat32_lba);
 
-    return new(vblk, start_lba, 512);
+    return new(vblk, start_lba, 512, palloc);
 }
 
 /// Initialize a FAT32 filesystem instance.
-fn new(vblk: *VirtioBlk, base: Lba, comptime lbasize: usize) Error!Self {
+fn new(vblk: *VirtioBlk, base: Lba, comptime lbasize: usize, palloc: PageAllocator) Error!Self {
     // Read BPB.
     var bpbbuf: [lbasize]u8 align(@alignOf(Bpb)) = undefined;
     @memset(bpbbuf[0..], 0);
@@ -176,8 +301,11 @@ fn new(vblk: *VirtioBlk, base: Lba, comptime lbasize: usize) Error!Self {
     log.debug("   Revision  : {d}.{d}", .{ bpb.fs_ver >> 8, bpb.fs_ver & 0xFF });
     log.debug("   Root Clus : {d}", .{bpb.root_clus});
     log.debug("   Bytes/sec : {d}", .{bpb.bytes_per_sec});
+    log.debug("   Sec/Clus  : {d}", .{bpb.sec_per_clus});
     log.debug("   Media     : 0x{X}", .{bpb.media});
+    log.debug("   Rsvd Secs : {d}", .{bpb.rsvd_sec_cnt});
     log.debug("   #FATs     : {d}", .{bpb.num_fats});
+    log.debug("   FAT Sz    : {d}", .{bpb.fat_sz32});
     log.debug("   #Sectors  : {d}", .{bpb.tot_sec32});
     if (bpb.boot_sig == Bpb.valid_boot_sig) {
         log.debug("   Vol ID    : 0x{X}", .{bpb.vol_id});
@@ -185,7 +313,92 @@ fn new(vblk: *VirtioBlk, base: Lba, comptime lbasize: usize) Error!Self {
         log.debug("   Signature : {s}", .{bpb.fil_sys_type});
     }
 
-    hugin.unimplemented("Fat32.new");
+    // Validate BPB.
+    if (bpb.boot_sig != Bpb.valid_boot_sig) {
+        return Error.InvalidBootSector;
+    }
+    if (!std.mem.eql(u8, &bpb.fil_sys_type, fat32_signature)) {
+        return Error.InvalidBootSector;
+    }
+
+    // Read the first FAT.
+    const fat_size = bpb.fat_sz32 * bpb.bytes_per_sec;
+    const lba_fat_size = hugin.bits.roundup(fat_size, lbasize);
+    const fat = try palloc.allocPages(lba_fat_size >> hugin.mem.page_shift);
+    errdefer palloc.freePages(fat);
+
+    const fat_addr = base * lbasize + bpb.rsvd_sec_cnt * bpb.bytes_per_sec;
+    try vblk.read(fat[0..lba_fat_size], fat_addr);
+
+    const rdents_size = hugin.bits.roundup(bpb.sec_per_clus * bpb.bytes_per_sec, hugin.mem.page_size);
+    const rdents_buf = try palloc.allocPages(rdents_size >> hugin.mem.page_shift);
+    errdefer palloc.freePages(rdents_buf);
+
+    const self = Self{
+        .vblk = vblk,
+        .base = base,
+        .lbasize = lbasize,
+        .bytes_per_sec = bpb.bytes_per_sec,
+        .sec_per_clus = bpb.sec_per_clus,
+        .rsvd_sec_cnt = bpb.rsvd_sec_cnt,
+        .fat_sz32 = bpb.fat_sz32,
+        .num_fats = bpb.num_fats,
+        .fat = fat,
+        .rdents = rdents_buf,
+    };
+
+    // Read root directory.
+    const root_sec = self.clus2sec(bpb.root_clus);
+    try self.readSectors(rdents_buf, root_sec, self.sec_per_clus);
+
+    // Parse root directory entries.
+    log.debug("List of files:", .{});
+    var namebuf: [13]u8 = undefined;
+
+    const rdents_len = self.sec_per_clus * bpb.bytes_per_sec / @sizeOf(DirEntry);
+    for (self.getRdents()[0..rdents_len]) |*dent| {
+        if (dent.longname()) {
+            continue; // not supported.
+        }
+        if (dent.attr.directory) {
+            continue; // not supported.
+        }
+        if (dent.free()) {
+            continue; // free entry.
+        }
+        if (dent.sentinel()) {
+            break; // end of entries.
+        }
+
+        @memset(namebuf[0..], 0);
+        const name = try dent.getName(&namebuf);
+        log.debug("   {s} ({d} bytes)", .{ name, dent.size });
+    }
+
+    // TODO: implement
+
+    return self;
+}
+
+/// Convert cluster number to sector number.
+fn clus2sec(self: Self, clus: u32) u32 {
+    return (clus - 2) * self.sec_per_clus + self.rsvd_sec_cnt + @as(u32, self.num_fats) * self.fat_sz32;
+}
+
+/// Read `count` sectors starting from `sec` into `buffer`.
+fn readSectors(self: Self, buffer: []u8, sec: u32, count: u32) Error!void {
+    const addr = (self.base * self.lbasize) + (sec * self.bytes_per_sec);
+    const size = count * self.bytes_per_sec;
+    if (buffer.len < size) {
+        return Error.InvalidArgument;
+    }
+
+    return self.vblk.read(buffer, addr);
+}
+
+/// Get root directory entries.
+fn getRdents(self: Self) [*]align(1) const DirEntry {
+    return @ptrCast(@alignCast(self.rdents.ptr));
 }
 
 // =============================================================
@@ -195,4 +408,5 @@ fn new(vblk: *VirtioBlk, base: Lba, comptime lbasize: usize) Error!Self {
 const std = @import("std");
 const log = std.log.scoped(.fat32);
 const hugin = @import("hugin");
+const PageAllocator = hugin.mem.PageAllocator;
 const VirtioBlk = hugin.drivers.VirtioBlk;

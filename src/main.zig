@@ -133,11 +133,12 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
     // Setup virtio-blk device.
     log.info("Setting up virtio-blk device...", .{});
     {
-        const vblk = try setupVirtioBlk(dtb) orelse {
+        var vblk = try setupVirtioBlk(dtb) orelse {
             log.warn("No virtio-blk device found.", .{});
             return error.NoVirtioBlkDevice;
         };
-        _ = vblk;
+        const fat32 = try hugin.Fat32.from(&vblk, hugin.mem.page_allocator);
+        _ = fat32;
     }
 
     // Setup hypervisor configuration.
