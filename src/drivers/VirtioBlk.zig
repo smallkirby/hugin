@@ -139,6 +139,9 @@ fn operate(self: *Self, buffer: []u8, addr: u64, op: Operation) Error!void {
     if (addr & block_mask != 0) {
         return Error.InvalidAddress;
     }
+    if (buffer.len & block_mask != 0) {
+        return Error.InvalidAddress;
+    }
 
     // Setup status.
     var status: u8 = 0xFF;

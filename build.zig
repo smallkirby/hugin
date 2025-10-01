@@ -105,6 +105,11 @@ pub fn build(b: *std.Build) !void {
         "wait_qemu",
         "QEMU waits for GDB connection.",
     ) orelse false;
+    const debug_virtio = b.option(
+        bool,
+        "debug_virtio",
+        "Enable virtio debug logging.",
+    ) orelse false;
 
     const options = b.addOptions();
     options.addOption(std.log.Level, "log_level", log_level);
@@ -216,6 +221,7 @@ pub fn build(b: *std.Build) !void {
     });
     if (wait_qemu) try qemu_args.append(b.allocator, "-S");
     if (is_runtime_test) try qemu_args.append(b.allocator, "-semihosting");
+    if (debug_virtio) try qemu_args.appendSlice(b.allocator, &.{ "-d", "trace:virtio*" });
 
     const qemu_cmd = b.addSystemCommand(qemu_args.items);
     qemu_cmd.step.dependOn(b.getInstallStep());

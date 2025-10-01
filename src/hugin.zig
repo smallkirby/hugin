@@ -10,6 +10,7 @@ pub const mmio = @import("mmio.zig");
 pub const rtt = @import("rtt.zig");
 pub const serial = @import("serial.zig");
 
+pub const Fat32 = @import("Fat32.zig");
 pub const LogFn = klog.LogFn;
 pub const SpinLock = @import("SpinLock.zig");
 
@@ -70,6 +71,13 @@ pub fn endlessHalt() noreturn {
     }
 }
 
+/// Assert at compile time.
+pub fn comptimeAssert(cond: bool, comptime msg: []const u8, args: anytype) void {
+    if (!cond) {
+        @compileError(std.fmt.comptimePrint(msg, args));
+    }
+}
+
 // =============================================================
 // Tests
 // =============================================================
@@ -85,4 +93,5 @@ test {
 // Imports
 // =============================================================
 
+const std = @import("std");
 const options = @import("options");

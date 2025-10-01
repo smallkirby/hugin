@@ -26,6 +26,7 @@ zig build test --summary all
 | `qemu` | String | Path to QEMU aarch64 install directory. | `"$HOME/qemu-aarch64"` |
 | `vfat` | Flag | Use QEMU Virtual FAT filesystem. | `false` |
 | `wait_qemu` | Flag | Make QEMU wait for being attached by GDB. | `false` |
+| `debug_virtio` | Flag | Enable virtio debug logging. | `false` |
 
 ## License
 
