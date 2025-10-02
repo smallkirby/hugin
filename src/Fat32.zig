@@ -562,6 +562,9 @@ const FileIter = struct {
             if (dent.attr.directory) {
                 continue; // not supported.
             }
+            if (dent.attr.volume_id) {
+                continue; // volume label entry.
+            }
             if (dent.free()) {
                 continue; // free entry.
             }
