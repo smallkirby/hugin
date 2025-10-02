@@ -139,8 +139,21 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
         };
         log.info("Found the target MMIO virtio-blk device @ 0x{X}", .{vblk.vreg.base});
 
+        // Init filesystem.
         const fat32 = try hugin.Fat32.from(&vblk, hugin.mem.page_allocator);
-        _ = fat32;
+
+        // Read Hugin kernel image.
+        const hugin_elf = (try fat32.lookup("HUGIN")).?;
+        log.debug("Found Hugin kernel ELF: {d} bytes", .{hugin_elf.size});
+
+        const buf = try hugin.mem.general_allocator.alloc(u8, hugin_elf.size);
+        defer hugin.mem.general_allocator.free(buf);
+        const nread = try fat32.read(hugin_elf, buf, 0, hugin.mem.page_allocator);
+        hugin.rtt.expectEqual(hugin_elf.size, nread);
+
+        // Check ELF header magic.
+        hugin.rtt.expect(std.mem.eql(u8, std.elf.MAGIC, buf[0..4]));
+        log.debug("Hugin kernel ELF header magic is valid.", .{});
     }
 
     // Setup hypervisor configuration.

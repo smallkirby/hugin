@@ -19,6 +19,8 @@ HEYSTACK=(
   "[DEBUG] fat32   |    Revision  : 0.0"
   "[DEBUG] fat32   |    Root Clus : 2"
   "[DEBUG] fat32   |    Bytes/sec : 512"
+  # Can read file from the FAT32 filesystem.
+  "[DEBUG] main    | Hugin kernel ELF header magic is valid."
   # Switch to EL1 has been done.
   "[INFO ] main    | Hello from EL1!"
 )

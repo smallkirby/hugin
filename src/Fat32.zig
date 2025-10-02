@@ -8,6 +8,8 @@ pub const Error = error{
     NotFound,
     /// Invalid argument.
     InvalidArgument,
+    /// Failed to iterate cluster chain.
+    ClusterNotFound,
 } || VirtioBlk.Error || PageAllocator.Error;
 
 /// Underlying Virtio Block Device.
@@ -33,6 +35,10 @@ rdents: []u8,
 
 /// Type of Logical Block Address.
 const Lba = u32;
+/// Index of a cluster.
+const Cluster = u32;
+/// Index of a sector.
+const Sector = u32;
 
 /// FAT32 filesystem signature in Boot Sector.
 const fat32_signature = "FAT32   ";
@@ -147,7 +153,7 @@ const Bpb = extern struct {
     /// Revision number.
     fs_ver: u16 align(1),
     /// Cluster number of the first cluster of the root directory.
-    root_clus: u32 align(1),
+    root_clus: Cluster align(1),
     /// Sector number of the FSInfo structure in the reserved area of the FAT32 volume.
     fs_info: u16 align(1),
     /// Sector number of the copy of the boot record.
@@ -269,6 +275,11 @@ const DirEntry = extern struct {
         return buf[0..cur];
     }
 
+    /// Get the first cluster number of this entry.
+    pub fn getFirstCluster(self: DirEntry) Cluster {
+        return hugin.bits.concat(Cluster, self.fstclus_hi, self.fstclus_lo);
+    }
+
     comptime {
         const size = @bitSizeOf(DirEntry);
         const expected = 32 * @bitSizeOf(u8);
@@ -321,7 +332,7 @@ fn new(vblk: *VirtioBlk, base: Lba, comptime lbasize: usize, palloc: PageAllocat
         return Error.InvalidBootSector;
     }
 
-    // Read the first FAT.
+    // Read the first FAT (more than one FAT is not supported yet).
     const fat_size = bpb.fat_sz32 * bpb.bytes_per_sec;
     const lba_fat_size = hugin.bits.roundup(fat_size, lbasize);
     const fat = try palloc.allocPages(lba_fat_size >> hugin.mem.page_shift);
@@ -351,42 +362,130 @@ fn new(vblk: *VirtioBlk, base: Lba, comptime lbasize: usize, palloc: PageAllocat
     const root_sec = self.clus2sec(bpb.root_clus);
     try self.readSectors(rdents_buf, root_sec, self.sec_per_clus);
 
-    // Parse root directory entries.
-    log.debug("List of files:", .{});
-    var namebuf: [13]u8 = undefined;
+    // Debug print root directory entries.
+    {
+        log.debug("List of files:", .{});
+        var namebuf: [13]u8 = undefined;
 
-    const rdents_len = self.sec_per_clus * bpb.bytes_per_sec / @sizeOf(DirEntry);
-    for (self.getRdents()[0..rdents_len]) |*dent| {
-        if (dent.longname()) {
-            continue; // not supported.
+        var iter = FileIter.new(self.getRdents());
+        while (iter.next()) |dent| {
+            const name = try dent.getName(&namebuf);
+            log.debug("   {s: <11} ({d} bytes)", .{ name, dent.size });
         }
-        if (dent.attr.directory) {
-            continue; // not supported.
-        }
-        if (dent.free()) {
-            continue; // free entry.
-        }
-        if (dent.sentinel()) {
-            break; // end of entries.
-        }
-
-        @memset(namebuf[0..], 0);
-        const name = try dent.getName(&namebuf);
-        log.debug("   {s: <11} ({d} bytes)", .{ name, dent.size });
     }
-
-    // TODO: implement
 
     return self;
 }
 
+/// Information about a file.
+pub const FileInfo = struct {
+    /// Number of the first cluster of the file.
+    cluster: Cluster,
+    /// File size in bytes.
+    size: u32,
+};
+
+/// Read a file described by `file` into `buffer` starting from `offset`.
+///
+/// - `file`: Information about the file to read.
+/// - `buffer`: Buffer to read into. The buffer does not have to be aligned.
+/// - `offset`: Offset in bytes from the beginning of the file to start reading.
+/// - `palloc`: Page allocator to allocate internal buffers.
+///
+/// Returns the number of bytes read.
+/// If the end of the file is reached before filling the buffer, the number of bytes read will be less than `buffer.len`.
+pub fn read(self: Self, file: FileInfo, buffer: []u8, offset: usize, palloc: PageAllocator) Error!usize {
+    const size = if (offset + buffer.len < file.size) blk: {
+        if (file.size <= offset) return 0;
+        break :blk file.size - offset;
+    } else buffer.len;
+
+    const bytes_per_clus = self.sec_per_clus * self.bytes_per_sec;
+    const clus_to_skip = offset / bytes_per_clus;
+    var bytes_skipped: usize = 0;
+
+    // Allocate an aligned buffer for reading sectors.
+    const tmpbuf_size = hugin.bits.roundup(bytes_per_clus, hugin.mem.page_size);
+    const tmpbuf = try palloc.allocPages(
+        hugin.bits.roundup(tmpbuf_size, hugin.mem.page_size) >> hugin.mem.page_shift,
+    );
+    defer palloc.freePages(tmpbuf);
+
+    // Skip clusters for offset.
+    var iter = ClusterIter.new(self.fat, file.cluster);
+    for (0..clus_to_skip) |_| {
+        if (iter.next() == null) {
+            return Error.InvalidArgument;
+        }
+        bytes_skipped += bytes_per_clus;
+    }
+
+    // Read clusters.
+    var num_read: usize = 0;
+    while (iter.next()) |clus| {
+        // Read all sectors in the cluster.
+        try self.readSectors(
+            tmpbuf,
+            self.clus2sec(clus),
+            self.sec_per_clus,
+        );
+
+        // Copy data to the user buffer.
+        const sec_offset = if (bytes_skipped < offset) blk: {
+            bytes_skipped = offset;
+            break :blk offset - bytes_skipped;
+        } else 0;
+        const size_to_copy = @min(size - num_read, bytes_per_clus - sec_offset);
+        @memcpy(
+            buffer[num_read .. num_read + size_to_copy],
+            tmpbuf[sec_offset .. sec_offset + size_to_copy],
+        );
+
+        num_read += size_to_copy;
+        if (num_read >= size) {
+            break;
+        }
+    }
+
+    hugin.rtt.expectEqual(size, num_read);
+    return num_read;
+}
+
+/// Find a file by its name.
+///
+/// LFN (Long File Name) entries are not supported.
+pub fn lookup(self: Self, name: []const u8) Error!?FileInfo {
+    if (name.len > 12) {
+        return null;
+    }
+
+    var entname_buf: [13]u8 = undefined;
+    var namebuf: [13]u8 = undefined;
+    const lname = std.ascii.lowerString(entname_buf[0..], name);
+
+    var iter = FileIter.new(self.getRdents());
+    while (iter.next()) |dent| {
+        const dent_name = try dent.getName(&namebuf);
+        const ldent_name = std.ascii.lowerString(entname_buf[0..], dent_name);
+
+        if (std.mem.eql(u8, lname, ldent_name)) {
+            return FileInfo{
+                .cluster = dent.getFirstCluster(),
+                .size = dent.size,
+            };
+        }
+    }
+
+    return null;
+}
+
 /// Convert cluster number to sector number.
-fn clus2sec(self: Self, clus: u32) u32 {
-    return (clus - 2) * self.sec_per_clus + self.rsvd_sec_cnt + @as(u32, self.num_fats) * self.fat_sz32;
+fn clus2sec(self: Self, clus: Cluster) Sector {
+    return (clus - 2) * self.sec_per_clus + self.rsvd_sec_cnt + @as(Cluster, self.num_fats) * self.fat_sz32;
 }
 
 /// Read `count` sectors starting from `sec` into `buffer`.
-fn readSectors(self: Self, buffer: []u8, sec: u32, count: u32) Error!void {
+fn readSectors(self: Self, buffer: []u8, sec: Sector, count: u32) Error!void {
     const addr = (self.base * self.lbasize) + (sec * self.bytes_per_sec);
     const size = count * self.bytes_per_sec;
     if (buffer.len < size) {
@@ -397,9 +496,85 @@ fn readSectors(self: Self, buffer: []u8, sec: u32, count: u32) Error!void {
 }
 
 /// Get root directory entries.
-fn getRdents(self: Self) [*]align(1) const DirEntry {
-    return @ptrCast(@alignCast(self.rdents.ptr));
+fn getRdents(self: Self) []const DirEntry {
+    const rdents_len = self.sec_per_clus * self.bytes_per_sec / @sizeOf(DirEntry);
+    const rdents: [*]align(1) const DirEntry = @ptrCast(@alignCast(self.rdents.ptr));
+    return rdents[0..rdents_len];
 }
+
+/// Iterator over cluster chain.
+const ClusterIter = struct {
+    /// FAT entries.
+    fat: []const Cluster,
+    /// Current cluster number.
+    cur: Cluster,
+
+    /// Create a new cluster iterator starting from `start`-th sector.
+    ///
+    /// The first `next()` call returns `start`.
+    pub fn new(fat: []u8, start: Cluster) ClusterIter {
+        hugin.rtt.expectEqual(0, fat.len % @sizeOf(Cluster));
+
+        const fatp: [*]const Cluster = @ptrCast(@alignCast(fat.ptr));
+
+        return ClusterIter{
+            .fat = fatp[0 .. fat.len / @sizeOf(Cluster)],
+            .cur = start,
+        };
+    }
+
+    /// Get the next cluster number.
+    pub fn next(self: *ClusterIter) ?Cluster {
+        if (self.cur < 2 or self.cur >= 0x0FFFFFF8) {
+            return null;
+        }
+
+        const nextc = self.fat[self.cur];
+        const ret = self.cur;
+        self.cur = nextc;
+
+        return ret;
+    }
+};
+
+/// Iterator over files in the root directory entries.
+const FileIter = struct {
+    /// Root directory entries.
+    rdents: []const DirEntry,
+    /// Current index.
+    cur: usize,
+
+    pub fn new(rdents: []const DirEntry) FileIter {
+        return FileIter{
+            .rdents = rdents,
+            .cur = 0,
+        };
+    }
+
+    pub fn next(self: *FileIter) ?*const DirEntry {
+        while (self.cur < self.rdents.len) {
+            const dent = &self.rdents[self.cur];
+            self.cur += 1;
+
+            if (dent.longname()) {
+                continue; // not supported.
+            }
+            if (dent.attr.directory) {
+                continue; // not supported.
+            }
+            if (dent.free()) {
+                continue; // free entry.
+            }
+            if (dent.sentinel()) {
+                return null; // end of entries.
+            }
+
+            return dent;
+        }
+
+        return null;
+    }
+};
 
 // =============================================================
 // Imports
