@@ -81,14 +81,18 @@ fn dataAbortHandler(ctx: *Context) void {
     const fipa = hpfar.ipa() | (far.addr & hugin.mem.page_mask);
 
     // Call MMIO handlers.
-    const width = getRegisterWidth(iss.sas);
-    _ = switch (iss.wnr) {
-        .write => mmio.write(fipa, reg, width),
-        .read => mmio.read(fipa, reg, width),
-    } catch |err| {
-        log.err("Failed to handle MMIO on 0x{X:0>16}: {t}", .{ fipa, err });
-        @panic("Abort.");
-    };
+    switch (iss.wnr) {
+        .read => {
+            const width = getRegisterWidth(iss.sas);
+            reg.* = switch (vm.current().mmioRead(fipa, width)) {
+                inline else => |v| bits.embed(reg.*, v, 0),
+            };
+        },
+        .write => {
+            const regv = getRegister(reg.*, iss.sas);
+            vm.current().mmioWrite(fipa, regv);
+        },
+    }
 
     // Advance ELR.
     const elr = am.mrs(.elr_el2);
@@ -105,6 +109,17 @@ fn getRegisterWidth(sas: @FieldType(regs.Esr.IssDabort, "sas")) mmio.Width {
         .doubleword => .dword,
     };
 }
+
+/// Get register value with specified width.
+fn getRegister(reg: u64, sas: @FieldType(regs.Esr.IssDabort, "sas")) mmio.Register {
+    return switch (sas) {
+        .byte => mmio.Register{ .byte = @truncate(reg) },
+        .halfword => mmio.Register{ .hword = @truncate(reg) },
+        .word => mmio.Register{ .word = @truncate(reg) },
+        .doubleword => mmio.Register{ .dword = reg },
+    };
+}
+
 // =============================================================
 // Imports
 // =============================================================
@@ -115,6 +130,7 @@ const log = std.log.scoped(.isr);
 const hugin = @import("hugin");
 const bits = hugin.bits;
 const mmio = hugin.mmio;
+const vm = hugin.vm;
 
 const am = @import("asm.zig");
 const gicv3 = @import("gicv3.zig");

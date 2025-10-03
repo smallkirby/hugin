@@ -9,6 +9,7 @@ pub const mem = @import("mem.zig");
 pub const mmio = @import("mmio.zig");
 pub const rtt = @import("rtt.zig");
 pub const serial = @import("serial.zig");
+pub const vm = @import("vm.zig");
 
 pub const Fat32 = @import("Fat32.zig");
 pub const LogFn = klog.LogFn;

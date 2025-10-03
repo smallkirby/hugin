@@ -69,23 +69,6 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
         try setupMemory(dtb, elf_addr, sp);
     }
 
-    // Initialize paging.
-    log.info("Setting up paging...", .{});
-    {
-        const memory = try getAvailMemory(dtb);
-        log.debug("Mapping IPA to PA: 0x{X} -> 0x{X} (size: 0x{X})", .{
-            memory.addr,
-            memory.addr,
-            memory.size,
-        });
-        try hugin.arch.initPaging(
-            memory.addr,
-            memory.addr,
-            memory.size,
-            hugin.mem.page_allocator,
-        );
-    }
-
     // Setup interrupts.
     log.info("Setting up interrupts...", .{});
     {
@@ -156,67 +139,18 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
         log.debug("Hugin kernel ELF header magic is valid.", .{});
     }
 
-    // Setup hypervisor configuration.
+    // Init VM.
     {
-        const hcr_el2 = std.mem.zeroInit(hugin.arch.regs.HcrEl2, .{
-            .rw = true, // Aarch64
-            .api = true, // Disable PAuth.
-            .vm = true, // Enable virtualization.
-            .fmo = true, // Enable FIQ routing.
-            .imo = true, // Enable IRQ routing.
-            .amo = true, // Enable SError routing.
-        });
-        hugin.arch.am.msr(.hcr_el2, hcr_el2);
+        try hugin.vm.init();
     }
 
-    // Jump to EL1h.
-    {
-        // Setup EL1 state.
-        const spsr_el2 = std.mem.zeroInit(hugin.arch.regs.Spsr, .{
-            .m_elsp = 0b0101, // EL1h
-        });
-        const elr_el2 = hugin.arch.regs.Elr{
-            .addr = @intFromPtr(&el1Entry),
-        };
-        hugin.arch.am.msr(.spsr_el2, spsr_el2);
-        hugin.arch.am.msr(.elr_el2, elr_el2);
-
-        // Setup SP_EL1.
-        const el1stack_sizep = 3;
-        const el1stack = try hugin.mem.page_allocator.allocPages(el1stack_sizep);
-        log.debug(
-            "SP_EL1: 0x{X:0>16}",
-            .{@intFromPtr(el1stack.ptr) + el1stack_sizep * hugin.mem.size_4kib},
-        );
-        hugin.arch.am.msr(.sp_el1, @bitCast(@intFromPtr(el1stack.ptr) + el1stack_sizep * hugin.mem.size_4kib));
-
-        // Jump to EL1h.
-        log.info("Switching to EL1h...", .{});
-        hugin.arch.am.eret();
+    if (hugin.is_runtime_test) {
+        hugin.terminateQemu(0);
     }
 
     // EOL.
     while (true) {
         hugin.arch.halt();
-    }
-}
-
-export fn el1Entry() callconv(.c) noreturn {
-    el1Main() catch |err| {
-        log.err("EL1 aborted with error: {t}", .{err});
-        hugin.endlessHalt();
-    };
-
-    while (true) {
-        asm volatile ("wfi");
-    }
-}
-
-fn el1Main() !void {
-    log.info("Hello from EL1!", .{});
-
-    if (hugin.is_runtime_test) {
-        hugin.terminateQemu(0);
     }
 }
 
