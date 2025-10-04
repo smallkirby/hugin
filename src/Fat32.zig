@@ -459,16 +459,16 @@ pub fn lookup(self: Self, name: []const u8) Error!?FileInfo {
         return null;
     }
 
-    var entname_buf: [13]u8 = undefined;
     var namebuf: [13]u8 = undefined;
-    const lname = std.ascii.lowerString(entname_buf[0..], name);
+    var targetbuf: [13]u8 = undefined;
+    const target = std.ascii.lowerString(targetbuf[0..], name);
 
     var iter = FileIter.new(self.getRdents());
     while (iter.next()) |dent| {
         const dent_name = try dent.getName(&namebuf);
-        const ldent_name = std.ascii.lowerString(entname_buf[0..], dent_name);
+        const ldent_name = std.ascii.lowerString(namebuf[0..], dent_name);
 
-        if (std.mem.eql(u8, lname, ldent_name)) {
+        if (std.mem.eql(u8, target, ldent_name)) {
             return FileInfo{
                 .cluster = dent.getFirstCluster(),
                 .size = dent.size,
