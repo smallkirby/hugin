@@ -38,10 +38,6 @@ pub fn initS2Table(allocator: PageAllocator) PagingError!void {
         .vmid = 0,
     };
     am.msr(.vttbr_el2, vttbr);
-    log.debug(
-        "VTTBR_EL2: 0x{X:0>16} (level={d})",
-        .{ @as(u64, @bitCast(vttbr)), initial_level },
-    );
 }
 
 /// Map the given IPA `[pa, pa + size)` to PA `[ipa, ipa + size)`.

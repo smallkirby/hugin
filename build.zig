@@ -88,6 +88,16 @@ pub fn build(b: *std.Build) !void {
         "qemu",
         "Path to QEMU install directory",
     ) orelse b.fmt("{s}/qemu-aarch64", .{home});
+    const image_path = b.option(
+        []const u8,
+        "guest",
+        "Path to Linux kernel image",
+    ) orelse "Image";
+    const guestdisk_path = b.option(
+        []const u8,
+        "guestdisk",
+        "Path to guest disk image",
+    ) orelse "DISK0";
 
     const use_vfat = b.option(
         bool,
@@ -160,7 +170,29 @@ pub fn build(b: *std.Build) !void {
         b.fmt("{s}/{s}", .{ vfatdir_name, hugin.name }),
     );
     install_hugin.step.dependOn(&hugin.step);
+    const install_guest = b.addInstallFile(
+        std.Build.LazyPath{ .cwd_relative = image_path },
+        b.fmt("{s}/{s}", .{ vfatdir_name, "Image" }),
+    );
+    const install_guestdisk = b.addInstallFile(
+        std.Build.LazyPath{ .cwd_relative = guestdisk_path },
+        b.fmt("{s}/{s}", .{ vfatdir_name, "DISK0" }),
+    );
     b.getInstallStep().dependOn(&install_hugin.step);
+    b.getInstallStep().dependOn(&install_guest.step);
+    b.getInstallStep().dependOn(&install_guestdisk.step);
+
+    const build_dtb = b.addSystemCommand(&[_][]const u8{
+        "dtc",
+        "-I",
+        "dts",
+        "-O",
+        "dtb",
+        "-o",
+        b.fmt("{s}/{s}/{s}", .{ b.install_path, vfatdir_name, "DTB" }),
+        "assets/virt.dts",
+    });
+    b.getInstallStep().dependOn(&build_dtb.step);
 
     const compile_scr = b.addSystemCommand(&[_][]const u8{
         "scripts/build_scr.sh",

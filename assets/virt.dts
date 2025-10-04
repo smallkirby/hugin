@@ -1,0 +1,42 @@
+/dts-v1/;
+
+/ {
+  #size-cells = <0x02>;
+  #address-cells = <0x02>;
+
+  memory@40000000 {
+    device_type = "memory";
+    reg = <0x00 0x40000000 0x00 0x10000000>;
+  };
+
+  pl011@9000000 {
+    compatible = "arm,pl011", "arm,primecell";
+    clocks = <0x8000 0x8000>;
+    reg = <0x00 0x09000000 0x00 0x1000>;
+    clock-names = "uartclk", "apb_pclk";
+  };
+
+  cpus {
+    #size-cells = <0x00>;
+    #address-cells = <0x01>;
+    cpu@0 {
+      device_type = "cpu";
+      compatible = "arm,cortex-a53";
+      reg = <0x00>;
+      phandle = <0x8004>;
+    };
+  };
+
+  apb-pclk {
+    phandle = <0x8000>;
+    compatible = "fixed-clock";
+    clock-output-names = "clk24mhz";
+    #clock-cells = <0x00>;
+    clock-frequency = <0x16E3600>;
+  };
+
+  chosen {
+    stdout-path = "/pl011@09000000";
+    bootargs = "earlycon=pl011,0x09000000 console=ttyAMA0";
+  };
+};

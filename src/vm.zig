@@ -1,4 +1,6 @@
-pub const Error = hugin.mem.PageAllocator.Error || hugin.mmio.MmioError;
+pub const Error = error{
+    NotFound,
+} || hugin.mem.PageAllocator.Error || hugin.mmio.MmioError || hugin.Fat32.Error;
 
 /// List of VMs.
 var vms: SinglyLinkedList = .{};
@@ -19,8 +21,34 @@ pub const Vm = struct {
     ram_size: usize,
     /// List of MMIO handlers.
     devices: SinglyLinkedList,
+    /// Kernel information.
+    kernel: Kernel,
     /// List head of VMs.
     _node: SinglyLinkedList.Node = .{},
+
+    /// Launch the VM.
+    pub fn boot(self: *const Self) noreturn {
+        log.info("Booting VM#{d} (entry=0x{X})", .{ self.vmid, self.kernel.entry });
+
+        arch.am.msr(.spsr_el2, std.mem.zeroInit(arch.regs.Spsr, .{
+            .m_elsp = 0b0101, // EL1h
+        }));
+        arch.am.msr(.elr_el2, std.mem.zeroInit(arch.regs.Elr, .{
+            .addr = self.kernel.entry,
+        }));
+
+        asm volatile (
+            \\mov  x0, %[arg]
+            \\mov  x1, xzr
+            \\mov  x2, xzr
+            \\mov  x3, xzr
+            \\eret
+            :
+            : [arg] "r" (self.kernel.argument),
+        );
+
+        unreachable;
+    }
 
     /// Dispatch an MMIO read handler for the given address.
     pub fn mmioRead(self: *Self, addr: usize, width: mmio.Width) mmio.Register {
@@ -57,6 +85,14 @@ pub const Vm = struct {
     }
 };
 
+/// Kernel information.
+pub const Kernel = struct {
+    /// Guest physical address of kernel entry point.
+    entry: usize,
+    /// Guest physical address of DTB.
+    argument: usize,
+};
+
 /// Virtual MMIO devices.
 pub const MmioDevice = struct {
     /// Any context for the MMIO device.
@@ -80,12 +116,13 @@ pub const MmioDevice = struct {
 };
 
 /// Initialize the VM subsystem.
-pub fn init() Error!void {
-    const vbase = 0x4000_0000;
-    const vsize = 256 * hugin.mem.mib;
+pub fn init(fat: hugin.Fat32) Error!void {
+    // Guest physical address (IPA) of available memory.
+    const ipabase = 0x4000_0000; // TODO: need mechanism to sync with dts
+    const ipasize = 256 * hugin.mem.mib;
 
     // Allocate resources for the VM.
-    const pram = try palloc.allocPages(vsize / hugin.mem.page_size);
+    const pram = try palloc.allocPages(ipasize / hugin.mem.page_size);
     const vmid = blk: {
         const tmp = next_vmid;
         next_vmid += 1;
@@ -93,16 +130,26 @@ pub fn init() Error!void {
     };
 
     // Setup Stage 2 Translation.
-    try hugin.arch.initPaging(
-        vbase,
-        @intFromPtr(pram.ptr),
-        pram.len,
-        hugin.mem.page_allocator,
-    );
+    {
+        try arch.initPaging(
+            ipabase,
+            @intFromPtr(pram.ptr),
+            pram.len,
+            hugin.mem.page_allocator,
+        );
+        log.debug("VM#{d}: RAM mapped: 0x{X} -> 0x{X}", .{
+            vmid,
+            ipabase,
+            @intFromPtr(pram.ptr),
+        });
+    }
 
     // Setup hypervisor configuration.
     {
-        const hcr_el2 = std.mem.zeroInit(hugin.arch.regs.HcrEl2, .{
+        arch.am.msr(.vpidr_el2, arch.am.mrs(.midr_el1));
+        arch.am.msr(.vmpidr_el2, arch.am.mrs(.mpidr_el1));
+
+        const hcr_el2 = std.mem.zeroInit(arch.regs.HcrEl2, .{
             .rw = true, // Aarch64
             .api = true, // Disable PAuth.
             .vm = true, // Enable virtualization.
@@ -110,23 +157,70 @@ pub fn init() Error!void {
             .imo = true, // Enable IRQ routing.
             .amo = true, // Enable SError routing.
         });
-        hugin.arch.am.msr(.hcr_el2, hcr_el2);
+        arch.am.msr(.hcr_el2, hcr_el2);
     }
 
     // Create the VM instance.
     const vm = try allocator.create(Vm);
     vm.* = Vm{
         .vmid = vmid,
-        .ram_vbase = vbase,
+        .ram_vbase = ipabase,
         .ram_pbase = @intFromPtr(pram.ptr),
         .ram_size = pram.len,
         .devices = .{},
+        .kernel = undefined,
     };
     vms.prepend(&vm._node);
 
+    // Load a guest kernel image and DTB.
+    {
+        const kernel = try fat.lookup("IMAGE") orelse return Error.NotFound;
+        const dtb = try fat.lookup("DTB") orelse return Error.NotFound;
+        const kernel_offset = bits.roundup(dtb.size, hugin.mem.size_2mib);
+
+        rtt.expectEqual(dtb.size, try fat.read(
+            dtb,
+            pram[0 .. 0 + dtb.size],
+            0,
+            palloc,
+        ));
+        rtt.expectEqual(kernel.size, try fat.read(
+            kernel,
+            pram[kernel_offset .. kernel_offset + kernel.size],
+            0,
+            palloc,
+        ));
+
+        const khdr: *KernelHeader = @ptrCast(@alignCast(&pram[kernel_offset]));
+        if (khdr.magic != KernelHeader.valid_magic) {
+            log.err("Invalid kernel image magic: 0x{X:0>8}", .{khdr.magic});
+            return Error.NotFound;
+        }
+        const text_offset = if (khdr.image_size != 0) khdr.text_offset else 0x80000;
+
+        vm.kernel = Kernel{
+            .entry = ipabase + kernel_offset + text_offset,
+            .argument = ipabase,
+        };
+
+        log.debug("Guest Kernel Info (IPA):", .{});
+        log.debug("    DTB         : 0x{X} - 0x{X}", .{
+            vm.kernel.argument,
+            vm.kernel.argument + dtb.size,
+        });
+        log.debug("    Entry       : 0x{X}", .{vm.kernel.entry});
+        log.debug("    Text Offset : 0x{X}", .{text_offset});
+        log.debug("    Image Size  : {d} bytes", .{khdr.image_size});
+        log.debug("    Flags       : 0x{X:0>16}", .{khdr.flags});
+    }
+
     // Add MMIO devices.
     {
-        const pl011 = try mmio.pl001.Device.new(allocator);
+        const pl011 = try mmio.pl001.Device.new(
+            allocator,
+            0x0900_0000, // TODO: need mechanism to sync with dts
+            0x1000,
+        );
         vm.devices.prepend(&pl011.interface._node);
     }
 }
@@ -136,6 +230,38 @@ pub fn current() *Vm {
     return @fieldParentPtr("_node", vms.first.?);
 }
 
+/// Kernel header of Aarch64 Linux kernel.
+///
+/// See https://www.kernel.org/doc/Documentation/arm64/booting.txt
+const KernelHeader = extern struct {
+    const valid_magic = 0x644d5241; // "ARM\x64"
+
+    /// Executable code.
+    code0: u32,
+    /// Executable code.
+    code1: u32,
+    /// Image load offset, little endian.
+    text_offset: u64,
+    /// Effective Image size, little endian.
+    image_size: u64,
+    /// Kernel flags, little endian.
+    flags: u64,
+    /// Reserved.
+    res2: u64 = 0,
+    /// Reserved.
+    res3: u64 = 0,
+    /// Reserved.
+    res4: u64 = 0,
+    /// MAgic number, little endian, "ARM\x64".
+    magic: u32,
+    /// Reserved.
+    res5: u32 = 0,
+
+    comptime {
+        hugin.comptimeAssert(@bitSizeOf(KernelHeader) == 64 * 8, "Invalid KernelHeader size", .{});
+    }
+};
+
 // =============================================================
 // Imports
 // =============================================================
@@ -143,7 +269,10 @@ pub fn current() *Vm {
 const std = @import("std");
 const log = std.log.scoped(.vm);
 const hugin = @import("hugin");
+const arch = hugin.arch;
+const bits = hugin.bits;
 const mmio = hugin.mmio;
+const rtt = hugin.rtt;
 const allocator = hugin.mem.general_allocator;
 const palloc = hugin.mem.page_allocator;
 

@@ -79,6 +79,24 @@ pub fn comptimeAssert(cond: bool, comptime msg: []const u8, args: anytype) void 
     }
 }
 
+/// Print a hex dump of the given memory region.
+pub fn hexdump(addr: usize, len: usize, logger: anytype) void {
+    const bytes: [*]const u8 = @ptrFromInt(addr);
+    const per_line = 16;
+
+    if (len % per_line != 0) {
+        @panic("hexdump: length must be multiple of 16");
+    }
+
+    var i: usize = 0;
+    while (i < len) : (i += 16) {
+        logger(
+            "{X} | {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2} {X:0>2}",
+            .{ addr + i, bytes[i + 0], bytes[i + 1], bytes[i + 2], bytes[i + 3], bytes[i + 4], bytes[i + 5], bytes[i + 6], bytes[i + 7], bytes[i + 8], bytes[i + 9], bytes[i + 10], bytes[i + 11], bytes[i + 12], bytes[i + 13], bytes[i + 14], bytes[i + 15] },
+        );
+    }
+}
+
 // =============================================================
 // Tests
 // =============================================================

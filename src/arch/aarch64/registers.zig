@@ -28,7 +28,10 @@ pub const SystemReg = enum {
     sp_el1,
     sp_el2,
     sp_el3,
+    midr_el1,
+    vpidr_el2,
     mpidr_el1,
+    vmpidr_el2,
     icc_sre_el1,
     icc_sre_el2,
     icc_sre_el3,
@@ -60,7 +63,10 @@ pub const SystemReg = enum {
             .far_el1, .far_el2, .far_el3 => Far,
             .hpfar_el2 => Hpfar,
             .sp_el0, .sp_el1, .sp_el2, .sp_el3 => Sp,
+            .midr_el1 => Midr,
+            .vpidr_el2 => Vpidr,
             .mpidr_el1 => Mpidr,
+            .vmpidr_el2 => Vmpidr,
             .icc_sre_el1, .icc_sre_el2, .icc_sre_el3 => IccSre,
             .icc_pmr_el1 => IccPmr,
             .icc_bpr0_el1, .icc_bpr1_el1 => IccBpr,
@@ -831,6 +837,30 @@ pub const Sp = packed struct(u64) {
     addr: u64,
 };
 
+/// MIDR_EL1.
+///
+/// Main ID Register.
+pub const Midr = packed struct(u64) {
+    /// Revision number of the device.
+    revision: u4,
+    /// Primary Part Number of the device.
+    partnum: u12,
+    /// Architecture version.
+    architecture: u4,
+    /// Variant number.
+    variant: u4,
+    /// The Implementer code.
+    implementer: u8,
+    /// Reserved.
+    _reserved: u32 = 0,
+};
+
+/// VPIDR_EL2.
+///
+/// Virtualization Processor ID Register.
+/// This value is returned by EL1 reads of MIDR_EL1.
+pub const Vpidr = Midr;
+
 /// MPIDR_EL1.
 ///
 /// Multiprocessor Affinity Register.
@@ -870,6 +900,12 @@ pub const Mpidr = packed struct(u64) {
         });
     }
 };
+
+/// MPIDR_EL2.
+///
+/// Virtualization Multiprocessor ID Register.
+/// This value is returned by EL1 reads of MPIDR_EL1.
+pub const Vmpidr = Mpidr;
 
 /// ICC_SRE_ELx.
 ///

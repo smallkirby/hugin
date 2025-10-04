@@ -21,10 +21,14 @@ HEYSTACK=(
   "[DEBUG] fat32   |    Bytes/sec : 512"
   # Can read file from the FAT32 filesystem.
   "[DEBUG] main    | Hugin kernel ELF header magic is valid."
+  # Boot Linux kernel.
+  "Booting Linux on physical CPU"
+  "Built 1 zonelists, mobility grouping on."
 )
 
 USE_SUDO=0
 UBOOT_DIR=
+EXPECT_TIMEOUT=0
 
 function usage_exit()
 {
@@ -34,7 +38,7 @@ function usage_exit()
 
 # Parse arguments.
 ARGS=$(getopt \
-  --longoptions uboot:,use-sudo \
+  --longoptions uboot:,use-sudo,expect-timeout \
   --options u:s \
   -- "$@" \
 )
@@ -51,6 +55,10 @@ while [ "$#" -gt 0 ]; do
       ;;
     -s|--use-sudo)
       USE_SUDO=1
+      shift
+      ;;
+    --expect-timeout)
+      EXPECT_TIMEOUT=1
       shift
       ;;
     --)
@@ -111,14 +119,22 @@ function main()
 
   echo ""
 
-  if [ "$QEMU_RETVAL" -eq 124 ]; then
-    echo_error "Timeout."
-    exit 1
-  fi
-  local ret=$QEMU_RETVAL
-  if [ "$ret" -ne 0 ]; then
-    echo_error "QEMU exited with error code $ret."
-    exit 1
+  if [ "$EXPECT_TIMEOUT" -eq 1 ]; then
+    if [ "$QEMU_RETVAL" -ne 124 ]; then
+      echo_error "Expected timeout, but QEMU exited with code $QEMU_RETVAL."
+      exit 1
+    fi
+    echo_normal "Timeout as expected."
+  else
+    if [ "$QEMU_RETVAL" -eq 124 ]; then
+      echo_error "Timeout."
+      exit 1
+    fi
+    local ret=$QEMU_RETVAL
+    if [ "$ret" -ne 0 ]; then
+      echo_error "QEMU exited with error code $ret."
+      exit 1
+    fi
   fi
 
   echo_normal "Checking output..."

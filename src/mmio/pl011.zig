@@ -22,14 +22,14 @@ pub const Device = struct {
     };
 
     /// Create a new PL011 device instance.
-    pub fn new(allocator: Allocator) Error!*Device {
+    pub fn new(allocator: Allocator, base: usize, len: usize) Error!*Device {
         const self = try allocator.create(Device);
         self.* = .{
             .flag = std.mem.zeroInit(Flag, .{}),
             .mask = 0,
             .ctl = std.mem.zeroInit(Control, .{}),
             .rxbuf = undefined,
-            .interface = initInterface(self),
+            .interface = initInterface(self, base, len),
         };
 
         return self;
@@ -73,11 +73,11 @@ pub const Device = struct {
     }
 
     /// Get the MMIO device interface.
-    pub fn initInterface(self: *Device) vm.MmioDevice {
+    pub fn initInterface(self: *Device, base: usize, len: usize) vm.MmioDevice {
         return .{
             .ctx = @ptrCast(self),
-            .base = 0x9_000_000, // TODO
-            .len = 0x1000, // TODO
+            .base = base,
+            .len = len,
             .handler = handler,
         };
     }

@@ -26,9 +26,24 @@ jobs:
 
       - name: Install dependency
         run: |
-          sudo apt update
-          sudo apt install -y \
-            curl wget tar xz-utils mtools
+          apt update
+          apt install -y \
+            curl \
+            wget \
+            tar \
+            xz-utils \
+            mtools \
+            device-tree-compiler \
+            wget \
+            cpio \
+            unzip \
+            rsync \
+            sudo \
+            fdisk \
+            dosfstools \
+            file \
+            socat \
+            qemu-system-arm
 
       - name: Install zig
         run: |
@@ -42,5 +57,9 @@ jobs:
             -Dlog_level=debug \
             -Doptimize=${{ matrix.BUILD_TYPE }} \
             -Druntime_test \
-            -Duboot=$UBOOT
-          bash ./scripts/runtime_test.bash --uboot $UBOOT
+            -Duboot=$UBOOT \
+            -Dguest=/opt/Image \
+            -Dguestdisk=/opt/DISK0
+          bash ./scripts/runtime_test.bash \
+            --uboot $UBOOT \
+            --expect-timeout

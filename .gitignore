@@ -1,5 +1,6 @@
 /zig-out
 /.zig-cache
 
-*.dts
 *.dtb
+Image
+DISK0

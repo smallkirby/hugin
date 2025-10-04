@@ -115,7 +115,7 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
 
     // Setup virtio-blk device.
     log.info("Setting up virtio-blk device...", .{});
-    {
+    const fat = blk: {
         var vblk = try setupVirtioBlk(dtb) orelse {
             log.warn("No virtio-blk device found.", .{});
             return error.NoVirtioBlkDevice;
@@ -137,18 +137,18 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
         // Check ELF header magic.
         hugin.rtt.expect(std.mem.eql(u8, std.elf.MAGIC, buf[0..4]));
         log.debug("Hugin kernel ELF header magic is valid.", .{});
-    }
+
+        break :blk fat32;
+    };
 
     // Init VM.
     {
-        try hugin.vm.init();
-    }
-
-    if (hugin.is_runtime_test) {
-        hugin.terminateQemu(0);
+        try hugin.vm.init(fat);
+        try hugin.vm.current().boot();
     }
 
     // EOL.
+    log.err("Reached unreachable EOL.", .{});
     while (true) {
         hugin.arch.halt();
     }
