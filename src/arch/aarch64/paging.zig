@@ -190,7 +190,7 @@ fn mapS2Recursive(state: *TransState, level: LookupLevel, tbl: usize, num_descs:
             state.pa += block_size;
             state.remain -= block_size;
 
-            if (state.remain == 0) continue;
+            if (state.remain == 0) return else continue;
         }
 
         // Map next level table.
