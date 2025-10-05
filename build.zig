@@ -59,6 +59,7 @@ pub fn build(b: *std.Build) !void {
     // =============================================================
     // Options
     // =============================================================
+
     const s_log_level = b.option(
         []const u8,
         "log_level",
@@ -140,30 +141,35 @@ pub fn build(b: *std.Build) !void {
     // Executables
     // =============================================================
 
-    const hugin = b.addExecutable(.{
-        .name = "hugin",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/main.zig"),
-            .target = target,
-            .optimize = optimize,
-        }),
-        .linkage = .static,
-        .use_llvm = true,
-    });
-    hugin.entry = .{ .symbol_name = "main" };
-    hugin.linker_script = b.path("src/qemu.ld");
-    hugin.root_module.addImport("hugin", hugin_module);
-    hugin.root_module.addOptions("options", options);
-    hugin.root_module.addAssemblyFile(switch (target.result.cpu.arch) {
-        .aarch64 => b.path("src/arch/aarch64/isr.S"),
-        else => unreachable,
-    });
-    b.installArtifact(hugin);
+    const hugin = blk: {
+        const exe = b.addExecutable(.{
+            .name = "hugin",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/main.zig"),
+                .target = target,
+                .optimize = optimize,
+            }),
+            .linkage = .static,
+            .use_llvm = true,
+        });
+        exe.entry = .{ .symbol_name = "main" };
+        exe.linker_script = b.path("src/qemu.ld");
+        exe.root_module.addImport("hugin", hugin_module);
+        exe.root_module.addOptions("options", options);
+        exe.root_module.addAssemblyFile(switch (target.result.cpu.arch) {
+            .aarch64 => b.path("src/arch/aarch64/isr.S"),
+            else => unreachable,
+        });
+        b.installArtifact(exe);
+
+        break :blk exe;
+    };
 
     // =============================================================
-    // Initial image
+    // Disk image
     // =============================================================
 
+    // Copy files to the install directory.
     const vfatdir_name = "disk";
     const install_hugin = b.addInstallFile(
         hugin.getEmittedBin(),
@@ -182,136 +188,157 @@ pub fn build(b: *std.Build) !void {
     b.getInstallStep().dependOn(&install_guest.step);
     b.getInstallStep().dependOn(&install_guestdisk.step);
 
-    const build_dtb = b.addSystemCommand(&[_][]const u8{
-        "dtc",
-        "-I",
-        "dts",
-        "-O",
-        "dtb",
-        "-o",
-        b.fmt("{s}/{s}/{s}", .{ b.install_path, vfatdir_name, "DTB" }),
-        "assets/virt.dts",
-    });
-    b.getInstallStep().dependOn(&build_dtb.step);
+    // Compile DTB for the guest.
+    {
+        const command = b.addSystemCommand(&[_][]const u8{
+            "dtc",
+            "-I",
+            "dts",
+            "-O",
+            "dtb",
+            "-o",
+            b.fmt("{s}/{s}/{s}", .{ b.install_path, vfatdir_name, "DTB" }),
+            "assets/virt.dts",
+        });
+        command.step.dependOn(&install_hugin.step); // To ensure the install dir exists.
+        b.getInstallStep().dependOn(&command.step);
+    }
 
-    const compile_scr = b.addSystemCommand(&[_][]const u8{
-        "scripts/build_scr.sh",
-        uboot_dir,
-        b.fmt("{s}/{s}/boot.scr", .{ b.install_path, vfatdir_name }),
-    });
-    b.getInstallStep().dependOn(&compile_scr.step);
-    compile_scr.step.dependOn(&install_hugin.step);
+    // Compile boot.scr
+    const compile_scr = blk: {
+        const command = b.addSystemCommand(&[_][]const u8{
+            "scripts/build_scr.sh",
+            uboot_dir,
+            b.fmt("{s}/{s}/boot.scr", .{ b.install_path, vfatdir_name }),
+        });
+        command.step.dependOn(&install_hugin.step); // To ensure the install dir exists.
+        b.getInstallStep().dependOn(&command.step);
 
+        break :blk command;
+    };
+
+    // Create FAT32 disk image.
     const diskimg_name = "diskimg";
-    const build_fat32 = b.addSystemCommand(&[_][]const u8{
-        "scripts/create_disk.bash",
-        b.fmt("{s}/{s}", .{ b.install_path, vfatdir_name }), // copy source
-        b.fmt("{s}/{s}", .{ b.install_path, diskimg_name }), // output image
-    });
-    if (!use_vfat) b.getInstallStep().dependOn(&build_fat32.step);
-    build_fat32.step.dependOn(&compile_scr.step);
-    build_fat32.step.dependOn(&install_hugin.step);
+    {
+        const command = b.addSystemCommand(&[_][]const u8{
+            "scripts/create_disk.bash",
+            b.fmt("{s}/{s}", .{ b.install_path, vfatdir_name }), // copy source
+            b.fmt("{s}/{s}", .{ b.install_path, diskimg_name }), // output image
+        });
+        command.step.dependOn(&compile_scr.step);
+        command.step.dependOn(&install_hugin.step);
+        command.step.dependOn(&install_guest.step);
+        command.step.dependOn(&install_guestdisk.step);
+
+        if (!use_vfat) b.getInstallStep().dependOn(&command.step);
+    }
 
     // =============================================================
     // Run QEMU
     // =============================================================
 
-    const fs = blk: {
-        if (use_vfat) {
-            break :blk b.fmt("fat:rw:{s}/{s}", .{ b.install_path, vfatdir_name });
-        } else {
-            break :blk b.fmt("{s}/{s}", .{ b.install_path, diskimg_name });
-        }
-    };
-
     const qemu_bin = b.fmt("{s}/bin/qemu-system-aarch64", .{qemu_dir});
-    var qemu_args = std.array_list.Aligned([]const u8, null).empty;
-    defer qemu_args.deinit(b.allocator);
-    try qemu_args.appendSlice(b.allocator, &.{
-        qemu_bin,
-        "-M",
-        "virt,gic-version=3,secure=off,virtualization=on",
-        "-m",
-        "1G",
-        "-bios",
-        b.fmt("{s}/u-boot.bin", .{uboot_dir}),
-        "-cpu",
-        "cortex-a53",
-        "-device",
-        "virtio-blk-device,drive=disk",
-        "-drive",
-        b.fmt("file={s},format=raw,if=none,media=disk,id=disk", .{fs}),
-        "-nographic",
-        "-serial",
-        "mon:stdio",
-        "-no-reboot",
-        "-smp",
-        "3",
-        "-s",
-        "-d",
-        "guest_errors",
-    });
-    if (wait_qemu) try qemu_args.append(b.allocator, "-S");
-    if (is_runtime_test) try qemu_args.append(b.allocator, "-semihosting");
-    if (debug_virtio) try qemu_args.appendSlice(b.allocator, &.{ "-d", "trace:virtio*" });
+    {
+        const fs = blk: {
+            if (use_vfat) {
+                break :blk b.fmt("fat:rw:{s}/{s}", .{ b.install_path, vfatdir_name });
+            } else {
+                break :blk b.fmt("{s}/{s}", .{ b.install_path, diskimg_name });
+            }
+        };
 
-    const qemu_cmd = b.addSystemCommand(qemu_args.items);
-    qemu_cmd.step.dependOn(b.getInstallStep());
-    const run_qemu = b.step("run", "Run Hugin on QEMU");
-    run_qemu.dependOn(&qemu_cmd.step);
+        var qemu_args = std.array_list.Aligned([]const u8, null).empty;
+        defer qemu_args.deinit(b.allocator);
+        try qemu_args.appendSlice(b.allocator, &.{
+            qemu_bin,
+            "-M",
+            "virt,gic-version=3,secure=off,virtualization=on",
+            "-m",
+            "1G",
+            "-bios",
+            b.fmt("{s}/u-boot.bin", .{uboot_dir}),
+            "-cpu",
+            "cortex-a53",
+            "-device",
+            "virtio-blk-device,drive=disk",
+            "-drive",
+            b.fmt("file={s},format=raw,if=none,media=disk,id=disk", .{fs}),
+            "-nographic",
+            "-serial",
+            "mon:stdio",
+            "-no-reboot",
+            "-smp",
+            "3",
+            "-s",
+            "-d",
+            "guest_errors",
+        });
+        if (wait_qemu) try qemu_args.append(b.allocator, "-S");
+        if (is_runtime_test) try qemu_args.append(b.allocator, "-semihosting");
+        if (debug_virtio) try qemu_args.appendSlice(b.allocator, &.{ "-d", "trace:virtio*" });
+
+        const qemu_cmd = b.addSystemCommand(qemu_args.items);
+        qemu_cmd.step.dependOn(b.getInstallStep());
+        const run_qemu = b.step("run", "Run Hugin on QEMU");
+        run_qemu.dependOn(&qemu_cmd.step);
+    }
 
     // =============================================================
     // Devicetree
     // =============================================================
 
-    const dump_dts = b.addSystemCommand(&[_][]const u8{
-        qemu_bin,
-        "-M",
-        b.fmt("virt,gic-version=3,secure=off,virtualization=on,dumpdtb={s}/qemu.dtb", .{b.install_path}),
-        "-m",
-        "1G",
-        "-bios",
-        b.fmt("{s}/u-boot.bin", .{uboot_dir}),
-        "-cpu",
-        "cortex-a53",
-        "-drive",
-        b.fmt("file=fat:rw:{s}/{s},format=raw,if=none,media=disk,id=disk", .{ b.install_path, vfatdir_name }),
-        "-smp",
-        "3",
-    });
-    const decompile_dts = b.addSystemCommand(&[_][]const u8{
-        "dtc",
-        "-I",
-        "dtb",
-        "-O",
-        "dts",
-        "-o",
-        b.fmt("{s}/qemu.dts", .{b.install_path}),
-        b.fmt("{s}/qemu.dtb", .{b.install_path}),
-    });
-    decompile_dts.step.dependOn(&dump_dts.step);
+    {
+        const dump_dts = b.addSystemCommand(&[_][]const u8{
+            qemu_bin,
+            "-M",
+            b.fmt("virt,gic-version=3,secure=off,virtualization=on,dumpdtb={s}/qemu.dtb", .{b.install_path}),
+            "-m",
+            "1G",
+            "-bios",
+            b.fmt("{s}/u-boot.bin", .{uboot_dir}),
+            "-cpu",
+            "cortex-a53",
+            "-drive",
+            b.fmt("file=fat:rw:{s}/{s},format=raw,if=none,media=disk,id=disk", .{ b.install_path, vfatdir_name }),
+            "-smp",
+            "3",
+        });
+        const decompile_dts = b.addSystemCommand(&[_][]const u8{
+            "dtc",
+            "-I",
+            "dtb",
+            "-O",
+            "dts",
+            "-o",
+            b.fmt("{s}/qemu.dts", .{b.install_path}),
+            b.fmt("{s}/qemu.dtb", .{b.install_path}),
+        });
+        decompile_dts.step.dependOn(&dump_dts.step);
 
-    const extract_dts = b.step("dts", "Extract QEMU devicetree");
-    extract_dts.dependOn(&decompile_dts.step);
+        const extract_dts = b.step("dts", "Extract QEMU devicetree");
+        extract_dts.dependOn(&decompile_dts.step);
+    }
 
     // =============================================================
     // Unit tests
     // =============================================================
 
-    const hugin_unit_test = b.addTest(.{
-        .name = "hugin_test",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("src/hugin.zig"),
-            .target = b.resolveTargetQuery(.{}),
-            .optimize = optimize,
-            .link_libc = true,
-        }),
-        .use_llvm = false,
-    });
-    hugin_unit_test.root_module.addImport("hugin", hugin_unit_test.root_module);
-    hugin_unit_test.root_module.addOptions("options", options);
-    const run_hugin_unit_test = b.addRunArtifact(hugin_unit_test);
+    {
+        const hugin_unit_test = b.addTest(.{
+            .name = "hugin_test",
+            .root_module = b.createModule(.{
+                .root_source_file = b.path("src/hugin.zig"),
+                .target = b.resolveTargetQuery(.{}),
+                .optimize = optimize,
+                .link_libc = true,
+            }),
+            .use_llvm = false,
+        });
+        hugin_unit_test.root_module.addImport("hugin", hugin_unit_test.root_module);
+        hugin_unit_test.root_module.addOptions("options", options);
+        const run_hugin_unit_test = b.addRunArtifact(hugin_unit_test);
 
-    const unit_test_step = b.step("test", "Run unit tests");
-    unit_test_step.dependOn(&run_hugin_unit_test.step);
+        const unit_test_step = b.step("test", "Run unit tests");
+        unit_test_step.dependOn(&run_hugin_unit_test.step);
+    }
 }
