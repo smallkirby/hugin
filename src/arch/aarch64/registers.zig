@@ -44,23 +44,24 @@ pub const SystemReg = enum {
     icc_bpr1_el1,
     icc_igrpen1_el1,
     icc_iar1_el1,
+    icc_dir_el1,
     icc_eoir1_el1,
-    icc_lr0_el1,
-    icc_lr1_el1,
-    icc_lr2_el1,
-    icc_lr3_el1,
-    icc_lr4_el1,
-    icc_lr5_el1,
-    icc_lr6_el1,
-    icc_lr7_el1,
-    icc_lr8_el1,
-    icc_lr9_el1,
-    icc_lr10_el1,
-    icc_lr11_el1,
-    icc_lr12_el1,
-    icc_lr13_el1,
-    icc_lr14_el1,
-    icc_lr15_el1,
+    ich_lr0_el2,
+    ich_lr1_el2,
+    ich_lr2_el2,
+    ich_lr3_el2,
+    ich_lr4_el2,
+    ich_lr5_el2,
+    ich_lr6_el2,
+    ich_lr7_el2,
+    ich_lr8_el2,
+    ich_lr9_el2,
+    ich_lr10_el2,
+    ich_lr11_el2,
+    ich_lr12_el2,
+    ich_lr13_el2,
+    ich_lr14_el2,
+    ich_lr15_el2,
     ich_vtr_el2,
     ich_eisr_el2,
     ich_hcr_el2,
@@ -98,8 +99,9 @@ pub const SystemReg = enum {
             .icc_bpr0_el1, .icc_bpr1_el1 => IccBpr,
             .icc_igrpen1_el1 => IccIgrpen1El1,
             .icc_iar1_el1 => IccIar1El1,
+            .icc_dir_el1 => IccDirEl1,
             .icc_eoir1_el1 => IccEoir1El1,
-            .icc_lr0_el1, .icc_lr1_el1, .icc_lr2_el1, .icc_lr3_el1, .icc_lr4_el1, .icc_lr5_el1, .icc_lr6_el1, .icc_lr7_el1, .icc_lr8_el1, .icc_lr9_el1, .icc_lr10_el1, .icc_lr11_el1, .icc_lr12_el1, .icc_lr13_el1, .icc_lr14_el1, .icc_lr15_el1 => IccLr,
+            .ich_lr0_el2, .ich_lr1_el2, .ich_lr2_el2, .ich_lr3_el2, .ich_lr4_el2, .ich_lr5_el2, .ich_lr6_el2, .ich_lr7_el2, .ich_lr8_el2, .ich_lr9_el2, .ich_lr10_el2, .ich_lr11_el2, .ich_lr12_el2, .ich_lr13_el2, .ich_lr14_el2, .ich_lr15_el2 => IchLr,
             .ich_vtr_el2 => IchVtr,
             .ich_eisr_el2 => IchEisr,
             .ich_hcr_el2 => IchHcr,
@@ -1085,6 +1087,19 @@ pub const IccIar1El1 = packed struct(u64) {
     _reserved: u40 = 0,
 };
 
+/// ICC_DIR1_EL1.
+///
+/// Interrupt Controller Deactivate Interrupt Register.
+///
+/// When interrupt priority drop is separated from interrupt deactivation,
+/// a write to this register deactivates the specified interrupt.
+pub const IccDirEl1 = packed struct(u64) {
+    /// The INTID of the interrupt to deactivate.
+    intid: u24,
+    /// Reserved.
+    _reserved: u40 = 0,
+};
+
 /// ICC_EOIR1_EL1.
 ///
 /// A PE writes to this register to inform the CPU interface that it has completed the processing of the interrupt.
@@ -1095,11 +1110,11 @@ pub const IccEoir1El1 = packed struct(u64) {
     _reserved: u40 = 0,
 };
 
-/// ICC_LR<n>_EL2.
+/// ICH_LR<n>_EL2.
 ///
 /// Interrupt Controller List Registers, n = 0-15.
 /// Provides interrupt context information for the virtual CPU interface.
-pub const IccLr = packed struct(u64) {
+pub const IchLr = packed struct(u64) {
     /// Virtual INTID of the interrupt.
     vintid: u32,
     /// Physical INTID, for hardware interrupts.

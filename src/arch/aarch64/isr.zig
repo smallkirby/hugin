@@ -8,28 +8,30 @@ pub fn init() void {
     };
     am.msr(.vbar_el2, vbar);
 
-    // Setup GIC CPU interface.
+    // Separate deactivate and priority drop modes.
     var ctlr = am.mrs(.icc_ctlr_el1);
-    ctlr.eoimode = .deactivates;
+    ctlr.eoimode = .no_deactivate;
     am.msr(.icc_ctlr_el1, ctlr);
 }
 
 /// IRQ handler for EL2.
 export fn irqHandler(ctx: *Context) callconv(.c) void {
     const intid = am.mrs(.icc_iar1_el1).intid;
-    const lr = am.mrs(.elr_el2);
-    const sr = am.mrs(.esr_el2);
-    log.err(
-        "!!! IRQ#{d}: LR=0x{X}, ESR={X:0>16}",
-        .{ intid, lr.addr, @as(u64, @bitCast(sr)) },
-    );
 
     // Handle the interrupt.
-    hugin.intr.dispatch(intid, ctx);
+    const deactivate = hugin.intr.dispatch(intid, ctx);
+
+    // Drop the priority of the interrupt.
+    {
+        const eoir: regs.IccEoir1El1 = .{ .intid = intid };
+        am.msr(.icc_eoir1_el1, eoir);
+    }
 
     // Send EOI.
-    const eoir: regs.IccEoir1El1 = .{ .intid = intid };
-    am.msr(.icc_eoir1_el1, eoir);
+    if (deactivate) {
+        const dir: regs.IccDirEl1 = .{ .intid = intid };
+        am.msr(.icc_dir_el1, dir);
+    }
 }
 
 /// Synchronous exception handler for EL2.

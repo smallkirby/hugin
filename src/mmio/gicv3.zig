@@ -340,20 +340,6 @@ pub const DistributorDevice = struct {
     /// See GICD_IGRPMODR<n>.
     const Igroupr = u32;
 
-    /// Interrupt group.
-    ///
-    /// (modifier, group):
-    /// - (0, 0): Secure Group 0
-    /// - (0, 1): Non-secure Group 1
-    /// - (1, 0): Secure Group 1
-    /// - (1, 1): Reserved.
-    const Group = enum(u2) {
-        secure_grp0 = 0,
-        ns_grp1 = 1,
-        secure_grp1 = 2,
-        reserved = 3,
-    };
-
     /// GICD_IROUTER<n>.
     const Irouter = u64;
 
@@ -401,6 +387,7 @@ pub const RedistributorDevice = struct {
     ctlr: Ctlr,
     waker: Waker,
     group: u32,
+    groupmod: u32,
     enable: u32,
     pending: u32,
     config: [2]u32,
@@ -552,12 +539,53 @@ pub const RedistributorDevice = struct {
     }
 
     /// Inject a virtual interrupt.
-    fn inject(self: *const Self, intid: u32, pintid: ?u32) void {
-        _ = self;
-        _ = intid;
-        _ = pintid;
+    pub fn inject(self: *Self, intid: intr.IntrId, pintid: ?intr.IntrId) void {
+        // Redistributor is sleeping.
+        if (self.waker.ca) {
+            log.warn("Ignoring interrupt injection to sleeping Redistributor", .{});
+            return;
+        }
 
-        hugin.unimplemented("RedistributorDevice.inject");
+        // Push to pending.
+        self.pending = bits.set(self.pending, intid);
+
+        // Not enabled.
+        if (!bits.isset(self.enable, intid)) {
+            log.warn("Ignoring interrupt injection to disabled interrupt ID#{d}", .{intid});
+            return;
+        }
+        // Secure Group 1 is not supported.
+        if (bits.isset(self.groupmod, intid)) {
+            log.warn("Ignoring interrupt injection to unsupported Secure Group 1 ID#{d}", .{intid});
+            return;
+        }
+
+        const group: Group = if (bits.isset(self.group, intid)) .ns_grp1 else .secure_grp0;
+        const prio = self.getPriority(intid);
+
+        if (self.affinity == arch.am.mrs(.mpidr_el1).packedAffinity()) {
+            // Injection to the same PE.
+            hugin.vgic.pushVintr(
+                intid,
+                group.number(),
+                prio,
+                pintid,
+            );
+        } else {
+            hugin.unimplemented("RedistributorDevice.inject to other PE");
+        }
+    }
+
+    /// Get priority of an interrupt.
+    fn getPriority(self: *const Self, intid: intr.IntrId) Priority {
+        const idx = intid / @bitSizeOf(Ipriorityr);
+        return switch (intid % 4) {
+            0 => self.prio[idx].prio0,
+            1 => self.prio[idx].prio1,
+            2 => self.prio[idx].prio2,
+            3 => self.prio[idx].prio3,
+            else => unreachable,
+        };
     }
 
     /// Register map.
@@ -692,6 +720,29 @@ pub const RedistributorDevice = struct {
     /// Determines whether the corresponding PPI is edge-triggered or level-sensitive.
     /// Each two bits corresponds to a PPI.
     const Icfgr1 = u32;
+};
+
+/// Interrupt group.
+///
+/// (modifier, group):
+/// - (0, 0): Secure Group 0
+/// - (0, 1): Non-secure Group 1
+/// - (1, 0): Secure Group 1
+/// - (1, 1): Reserved.
+const Group = enum(u2) {
+    secure_grp0 = 0,
+    ns_grp1 = 1,
+    secure_grp1 = 2,
+    reserved = 3,
+
+    pub fn number(self: Group) u1 {
+        return switch (self) {
+            .secure_grp0 => 0,
+            .ns_grp1 => 1,
+            .secure_grp1 => 1,
+            .reserved => 0, // Reserved
+        };
+    }
 };
 
 /// Check access width.

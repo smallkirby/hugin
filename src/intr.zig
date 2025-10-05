@@ -27,7 +27,9 @@ pub const max_num_handlers = 256;
 var handlers: [max_num_handlers]Handler = [_]Handler{unhandledHandler} ** max_num_handlers;
 
 /// Interrupt handler function signature.
-pub const Handler = *const fn (*arch.regs.Context) void;
+///
+/// If the handler returns `true`, the interrupt is deactivated.
+pub const Handler = *const fn (*arch.regs.Context) bool;
 
 /// Interrupt kind.
 pub const Kind = enum {
@@ -56,8 +58,11 @@ pub fn init(dist_range: PhysRegion, redist_range: PhysRegion) void {
 /// Dispatches the interrupt to the appropriate handler.
 ///
 /// Called from the ISR stub.
-pub fn dispatch(vector: u24, context: *arch.regs.Context) void {
-    handlers[vector](context);
+///
+/// If the handler returns `true`, the interrupt should be deactivated.
+/// Otherwise, the priority should be just dropped.
+pub fn dispatch(vector: u24, context: *arch.regs.Context) bool {
+    return handlers[vector](context);
 }
 
 /// Enable an interrupt for the given ID and kind.
@@ -78,7 +83,7 @@ pub fn enable(offset: IntrId, kind: Kind, handler: Handler) IntrError!void {
     }
 }
 
-fn unhandledHandler(_: *arch.regs.Context) void {
+fn unhandledHandler(_: *arch.regs.Context) bool {
     hugin.unimplemented("Unhandled interrupt");
 }
 

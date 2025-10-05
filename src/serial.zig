@@ -36,8 +36,10 @@ pub fn writeString(s: []const u8) void {
 }
 
 /// IRQ handler for serial device.
-fn handler(_: *hugin.arch.Context) void {
+fn handler(_: *hugin.arch.Context) bool {
     _ = serial.getc();
+
+    return true;
 }
 
 // =============================================================

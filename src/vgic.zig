@@ -31,6 +31,7 @@ pub fn pushVintr(intid: intr.IntrId, group: u1, prio: intr.Priority, pintid: ?in
                 .group = group,
                 .hw = if (pintid) |_| true else false,
                 .state = .pending,
+                .nmi = false,
             }),
             .active => return setListRegister(i, .{
                 .vintid = lr.vintid,
@@ -38,68 +39,73 @@ pub fn pushVintr(intid: intr.IntrId, group: u1, prio: intr.Priority, pintid: ?in
                 .prio = lr.prio,
                 .group = lr.group,
                 .hw = lr.hw,
-                .state = .pending_active,
+                .state = .pending,
+                .nmi = false,
             }),
-            else => {},
+            else => continue,
         }
     }
+
+    @panic("No available List Register.");
 }
 
 /// Handler for a maintaenance interrupt that's asserted, in Hugin, when a virtual interrupt is deactivated.
-fn mintrHandler(_: *arch.regs.Context) void {
+fn mintrHandler(_: *arch.regs.Context) bool {
     const num_lrn: usize = arch.am.mrs(.ich_vtr_el2).list_regs + 1;
     const normed_num_lrn = @min(num_lrn, num_lrns);
 
     for (0..normed_num_lrn) |_| {
         hugin.unimplemented("mintrHandler");
     }
+
+    return true;
 }
 
 /// Number of ICC_LRn_EL1 registers.
 const num_lrns = 16;
 
-fn getListRegister(index: usize) arch.regs.IccLr {
-    return arch.am.mrs(switch (index) {
-        0 => .icc_lr0_el1,
-        1 => .icc_lr1_el1,
-        2 => .icc_lr2_el1,
-        3 => .icc_lr3_el1,
-        4 => .icc_lr4_el1,
-        5 => .icc_lr5_el1,
-        6 => .icc_lr6_el1,
-        7 => .icc_lr7_el1,
-        8 => .icc_lr8_el1,
-        9 => .icc_lr9_el1,
-        10 => .icc_lr10_el1,
-        11 => .icc_lr11_el1,
-        12 => .icc_lr12_el1,
-        13 => .icc_lr13_el1,
-        14 => .icc_lr14_el1,
-        15 => .icc_lr15_el1,
+fn getListRegister(index: usize) arch.regs.IchLr {
+    return switch (index) {
+        0 => arch.am.mrs(.ich_lr0_el2),
+        1 => arch.am.mrs(.ich_lr1_el2),
+        2 => arch.am.mrs(.ich_lr2_el2),
+        3 => arch.am.mrs(.ich_lr3_el2),
+        4 => arch.am.mrs(.ich_lr4_el2),
+        5 => arch.am.mrs(.ich_lr5_el2),
+        6 => arch.am.mrs(.ich_lr6_el2),
+        7 => arch.am.mrs(.ich_lr7_el2),
+        8 => arch.am.mrs(.ich_lr8_el2),
+        9 => arch.am.mrs(.ich_lr9_el2),
+        10 => arch.am.mrs(.ich_lr10_el2),
+        11 => arch.am.mrs(.ich_lr11_el2),
+        12 => arch.am.mrs(.ich_lr12_el2),
+        13 => arch.am.mrs(.ich_lr13_el2),
+        14 => arch.am.mrs(.ich_lr14_el2),
+        15 => arch.am.mrs(.ich_lr15_el2),
         else => @panic("Invalid index."),
-    });
+    };
 }
 
-fn setListRegister(index: usize, lr: arch.regs.IccLr) void {
-    arch.am.msr(switch (index) {
-        0 => .icc_lr0_el1,
-        1 => .icc_lr1_el1,
-        2 => .icc_lr2_el1,
-        3 => .icc_lr3_el1,
-        4 => .icc_lr4_el1,
-        5 => .icc_lr5_el1,
-        6 => .icc_lr6_el1,
-        7 => .icc_lr7_el1,
-        8 => .icc_lr8_el1,
-        9 => .icc_lr9_el1,
-        10 => .icc_lr10_el1,
-        11 => .icc_lr11_el1,
-        12 => .icc_lr12_el1,
-        13 => .icc_lr13_el1,
-        14 => .icc_lr14_el1,
-        15 => .icc_lr15_el1,
+fn setListRegister(index: usize, lr: arch.regs.IchLr) void {
+    switch (index) {
+        0 => arch.am.msr(.ich_lr0_el2, lr),
+        1 => arch.am.msr(.ich_lr1_el2, lr),
+        2 => arch.am.msr(.ich_lr2_el2, lr),
+        3 => arch.am.msr(.ich_lr3_el2, lr),
+        4 => arch.am.msr(.ich_lr4_el2, lr),
+        5 => arch.am.msr(.ich_lr5_el2, lr),
+        6 => arch.am.msr(.ich_lr6_el2, lr),
+        7 => arch.am.msr(.ich_lr7_el2, lr),
+        8 => arch.am.msr(.ich_lr8_el2, lr),
+        9 => arch.am.msr(.ich_lr9_el2, lr),
+        10 => arch.am.msr(.ich_lr10_el2, lr),
+        11 => arch.am.msr(.ich_lr11_el2, lr),
+        12 => arch.am.msr(.ich_lr12_el2, lr),
+        13 => arch.am.msr(.ich_lr13_el2, lr),
+        14 => arch.am.msr(.ich_lr14_el2, lr),
+        15 => arch.am.msr(.ich_lr15_el2, lr),
         else => @panic("Invalid index."),
-    }, lr);
+    }
 }
 
 // =============================================================

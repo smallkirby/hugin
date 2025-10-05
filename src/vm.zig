@@ -26,6 +26,10 @@ pub const Vm = struct {
     ram_size: usize,
     /// List of MMIO handlers.
     devices: SinglyLinkedList,
+    /// GICv3 Distributor MMIO device.
+    gicdist: *mmio.gicv3.DistributorDevice,
+    /// GICv3 Redistributor MMIO device.
+    gicredist: *mmio.gicv3.RedistributorDevice,
     /// Kernel information.
     kernel: Kernel,
     /// List head of VMs.
@@ -191,6 +195,8 @@ pub fn init(fat: hugin.Fat32) Error!void {
         .ram_size = pram.len,
         .devices = .{},
         .kernel = undefined,
+        .gicdist = undefined,
+        .gicredist = undefined,
     };
     vms.prepend(&vm._node);
 
@@ -252,6 +258,7 @@ pub fn init(fat: hugin.Fat32) Error!void {
             0x10000,
         );
         vm.devices.prepend(&gicd.interface._node);
+        vm.gicdist = gicd;
 
         const gicr = try mmio.gicv3.RedistributorDevice.new(
             allocator,
@@ -259,6 +266,7 @@ pub fn init(fat: hugin.Fat32) Error!void {
             0x20000,
         );
         vm.devices.prepend(&gicr.interface._node);
+        vm.gicredist = gicr;
     }
 }
 

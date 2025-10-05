@@ -9,7 +9,11 @@ const Error = error{
 const dtb_gic_ppi = 1;
 
 /// Physical interrupt ID of EL1 Virtual Timer.
-var intid_offset: intr.IntrId = undefined;
+var pintid_offset: intr.IntrId = undefined;
+/// Virtual interrupt ID of EL1 Virtual Timer.
+///
+/// "virtual" here means "to a guest OS".
+const vintid = 27;
 
 /// Initialize the timer globally.
 pub fn initGlobal(dtb: hugin.dtb.Dtb) Error!void {
@@ -21,7 +25,7 @@ pub fn initGlobal(dtb: hugin.dtb.Dtb) Error!void {
     const ints = prop.slice();
 
     if (bits.fromBigEndian(ints[6]) == dtb_gic_ppi) {
-        intid_offset = @intCast(bits.fromBigEndian(ints[7]));
+        pintid_offset = @intCast(bits.fromBigEndian(ints[7]));
     } else {
         return Error.NotFound;
     }
@@ -33,11 +37,18 @@ pub fn initLocal() Error!void {
     arch.am.msr(.cntvoff_el2, arch.regs.Cntvoff{ .offset = 0 });
 
     // Enable interrupt.
-    try intr.enable(intid_offset, .ppi, timerHandler);
+    try intr.enable(pintid_offset, .ppi, timerHandler);
 }
 
-fn timerHandler(_: *arch.regs.Context) void {
-    hugin.unimplemented("timerHandler");
+/// Timer interrupt handler
+fn timerHandler(_: *arch.regs.Context) bool {
+    hugin.vm.current().gicredist.inject(
+        vintid,
+        pintid_offset + intr.ppi_base,
+    );
+
+    // Do not deactivate the interrupt since vGIC does it instead.
+    return false;
 }
 
 // =============================================================
