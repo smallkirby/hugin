@@ -24,6 +24,8 @@ HEYSTACK=(
   # Boot Linux kernel.
   "Booting Linux on physical CPU"
   "Built 1 zonelists, mobility grouping on."
+  # Timer interrupt works.
+  "clocksource: jiffies:"
 )
 
 USE_SUDO=0
