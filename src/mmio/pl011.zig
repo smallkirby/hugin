@@ -8,6 +8,8 @@ pub const Device = struct {
     mask: u16,
     /// Control register.
     ctl: Control,
+    /// Interrupt clear status.
+    icr: Icr,
     /// Receive FIFO.
     rxbuf: [4]u8,
     /// MMIO device interface.
@@ -28,6 +30,7 @@ pub const Device = struct {
             .flag = std.mem.zeroInit(Flag, .{}),
             .mask = 0,
             .ctl = std.mem.zeroInit(Control, .{}),
+            .icr = std.mem.zeroInit(Icr, .{}),
             .rxbuf = undefined,
             .interface = initInterface(self, base, len),
         };
@@ -55,7 +58,19 @@ pub const Device = struct {
             map.cr => Register{ .hword = @bitCast(self.ctl) },
             map.imsc => Register{ .hword = self.mask },
 
-            else => Error.Unimplemented,
+            map.periph_id0 => Register{ .byte = 0x11 },
+            map.periph_id1 => Register{ .byte = 0x10 },
+            map.periph_id2 => Register{ .byte = 0x04 },
+            map.periph_id3 => Register{ .byte = 0x00 },
+            map.pcell_id0 => Register{ .byte = 0x0D },
+            map.pcell_id1 => Register{ .byte = 0xF0 },
+            map.pcell_id2 => Register{ .byte = 0x05 },
+            map.pcell_id3 => Register{ .byte = 0xB1 },
+
+            else => {
+                log.err("Unhandled PL011 read @ 0x{X}", .{offset});
+                return Error.Unimplemented;
+            },
         };
     }
 
@@ -64,11 +79,23 @@ pub const Device = struct {
         const self: *Self = @ptrCast(@alignCast(ctx));
 
         switch (offset) {
-            map.dr => hugin.serial.write(value.byte),
+            map.dr => switch (value) {
+                .byte => hugin.serial.write(value.byte),
+                // When FIFOs are enabled, 4-bit status + 8-bit data are written.
+                .hword => hugin.serial.write(@truncate(value.hword)),
+                else => unreachable,
+            },
+            map.ibrd => {},
+            map.fbrd => {},
+            map.lcr_h => {},
             map.cr => self.ctl = @bitCast(value.hword),
             map.imsc => self.mask = @intCast(value.hword),
+            map.icr => self.icr = @bitCast(value.hword),
 
-            else => return Error.Unimplemented,
+            else => {
+                log.err("Unhandled PL011 write @ 0x{X}", .{offset});
+                return Error.Unimplemented;
+            },
         }
     }
 
@@ -113,6 +140,23 @@ const map = struct {
     const icr = 0x44;
     /// DMA Control Register.
     const dmacr = 0x48;
+
+    /// UARTPeriphID0.
+    const periph_id0 = 0xFE0;
+    /// UARTPeriphID1.
+    const periph_id1 = 0xFE4;
+    /// UARTPeriphID2.
+    const periph_id2 = 0xFE8;
+    /// UARTPeriphID3.
+    const periph_id3 = 0xFEC;
+    /// UARTPCellID0.
+    const pcell_id0 = 0xFF0;
+    /// UARTPCellID1.
+    const pcell_id1 = 0xFF4;
+    /// UARTPCellID2.
+    const pcell_id2 = 0xFF8;
+    /// UARTPCellID3.
+    const pcell_id3 = 0xFFC;
 };
 
 /// Flag Register.
@@ -169,11 +213,43 @@ const Control = packed struct(u16) {
     ctsen: bool,
 };
 
+/// UARTICR.
+///
+/// Interrupt clear register and is write-only.
+/// On a write of 1, the corresponding interrupt is cleared.
+const Icr = packed struct(u16) {
+    /// Clear UARTRIINTR.
+    rimic: bool,
+    /// Clear UARTCTSINTR.
+    ctsmic: bool,
+    /// Clear UARTDCDINTR.
+    dcdmic: bool,
+    /// Clear UARTDSRINTR.
+    dsrmic: bool,
+    /// Clear UARTRXINTR.
+    rxic: bool,
+    /// Clear UARTTXINTR.
+    txic: bool,
+    /// Clear UARTRTINTR.
+    rtic: bool,
+    /// Clear UARTFEINTR.
+    feic: bool,
+    /// Clear UARTPEINTR.
+    peic: bool,
+    /// Clear UARTBEINTR.
+    beic: bool,
+    /// Clear UARTOEINTR.
+    oeic: bool,
+    /// Reserved.
+    _reserved: u5 = 0,
+};
+
 // =============================================================
 // Imports
 // =============================================================
 
 const std = @import("std");
+const log = std.log.scoped(.vpl011);
 const hugin = @import("hugin");
 const mmio = hugin.mmio;
 const vm = hugin.vm;
