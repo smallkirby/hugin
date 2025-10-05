@@ -27,14 +27,22 @@ pub fn initInterrupts(dist_base: PhysRegion, redist_base: PhysRegion) struct { g
     return .{ dist, redist };
 }
 
-/// Configure GIC to enable an interrupt.
-pub fn enableIntr(id: hugin.intr.IntrId, dist: gicv3.Distributor) void {
+/// Configure GIC distributor to enable an interrupt.
+pub fn enableDistIntr(id: hugin.intr.IntrId, dist: gicv3.Distributor) void {
     dist.setGroup(id, .ns_grp1);
     dist.setPriority(id, 0);
     dist.setRouting(id, @bitCast(am.mrs(.mpidr_el1)));
     dist.setTrigger(id, .level);
     dist.clearPending(id);
     dist.enable(id);
+}
+
+/// Configure GIC redistributor to enable an interrupt.
+pub fn enableRedistIntr(id: hugin.intr.IntrId, redist: gicv3.Redistributor) void {
+    redist.setGroup(id, .ns_grp1);
+    redist.setPriority(id, 0);
+    redist.setTrigger(id, .level);
+    redist.enable(id);
 }
 
 /// Halt until interrupt.

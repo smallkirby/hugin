@@ -113,6 +113,12 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
         try hugin.serial.enableIntr(@intCast(inum));
     }
 
+    // Enable generic timer.
+    log.info("Initializing a generic timer globally...", .{});
+    {
+        try hugin.drivers.timer.initGlobal(dtb);
+    }
+
     // Setup virtio-blk device.
     log.info("Setting up virtio-blk device...", .{});
     const fat = blk: {

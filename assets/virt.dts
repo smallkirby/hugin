@@ -3,6 +3,7 @@
 / {
   #size-cells = <0x02>;
   #address-cells = <0x02>;
+  interrupt-parent = <0x8005>;
 
   memory@40000000 {
     device_type = "memory";
@@ -44,6 +45,12 @@
           <0x00 0x80A0000 0x00 0x20000>;   // GIC Redistributor
     phandle = <0x8005>;
     interrupt-controller;
+  };
+
+  timer {
+    interrupts = <0x01 0x0D 0xF04>, <0x01 0x0E 0xF04>, <0x01 0x0B 0xF04>, <0x01 0x0A 0xF04>;
+    always-on;
+    compatible = "arm,armv8-timer", "arm,armv7-timer";
   };
 
   chosen {

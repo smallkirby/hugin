@@ -1,6 +1,7 @@
 pub const Error = error{
     NotFound,
 } ||
+    hugin.dtb.DtbError ||
     hugin.mem.PageAllocator.Error ||
     hugin.mmio.MmioError ||
     hugin.intr.IntrError ||
@@ -158,6 +159,11 @@ pub fn init(fat: hugin.Fat32) Error!void {
     // Init vGIC
     {
         try hugin.vgic.init();
+    }
+
+    // Init Generic Timer.
+    {
+        try hugin.drivers.timer.initLocal();
     }
 
     // Setup hypervisor configuration.

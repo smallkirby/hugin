@@ -41,6 +41,7 @@ RUN sed -i -e 's/BR2_PACKAGE_HOST_QEMU=y/BR2_PACKAGE_HOST_QEMU=n/' .config
 RUN make -j$(nproc)
 RUN cp output/images/Image /opt/Image
 RUN cp output/images/rootfs.ext2 /opt/DISK0
+RUN cp output/build/linux-*/vmlinux /opt/vmlinux
 WORKDIR /opt
 RUN rm -rf /opt/buildroot-${BUILDROOT_VERSION}
 
@@ -50,6 +51,7 @@ FROM ubuntu:24.04 AS runtime
 
 COPY --from=builder /opt/Image /opt/Image
 COPY --from=builder /opt/DISK0 /opt/DISK0
+COPY --from=builder /opt/vmlinux /opt/vmlinux
 COPY --from=builder /opt/u-boot /opt/u-boot
 
 ENV UBOOT=/opt/u-boot

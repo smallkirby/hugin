@@ -15,18 +15,18 @@ pub const Distributor = struct {
         const igroupr = 0x0080;
         /// Interrupt Set-Enable Registers.
         const isenabler = 0x0100;
+        /// Interrupt Set-Pending Registers.
+        const ispendr = 0x0200;
+        /// Interrupt Clear-Pending Registers.
+        const icpendr = 0x0280;
         /// Interrupt Priority Registers.
         const ipriorityr = 0x0400;
         /// Interrupt Configuration Registers.
         const icfgr = 0x0C00;
         /// Interrupt Group Modifier Registers.
         const igrpmodr = 0x0D00;
-        /// Interrupt Set-Pending Registers.
-        const ispendr = 0x0200;
-        /// Interrupt Clear-Pending Registers.
-        const icpendr = 0x0280;
         /// Interrupt Routing Registers.
-        const irouter = 0x6000;
+        const irouter = 0x6100;
     };
 
     /// GICD_CTLR.
@@ -71,12 +71,6 @@ pub const Distributor = struct {
     /// Determines whether the corresponding interrupt is edge-triggered or level-sensitive.
     const Icfgr = u32;
 
-    /// Interrupt trigger type.
-    const Trigger = enum(u2) {
-        level = 0b00,
-        edge = 0b10,
-    };
-
     /// GICD_IGRPMODR<n>.
     ///
     /// When affinity routing is enabled, the bit corresponding to an interrupt is cancatenated to GICD_IGROUPR<n>
@@ -87,20 +81,6 @@ pub const Distributor = struct {
     ///
     /// See GICD_IGRPMODR<n>.
     const Igroupr = u32;
-
-    /// Interrupt group.
-    ///
-    /// (modifier, group):
-    /// - (0, 0): Secure Group 0
-    /// - (0, 1): Non-secure Group 1
-    /// - (1, 0): Secure Group 1
-    /// - (1, 1): Reserved.
-    const Group = enum(u2) {
-        secure_grp0 = 0,
-        ns_grp1 = 1,
-        secure_grp1 = 2,
-        reserved = 3,
-    };
 
     /// GICD_IROUTER<n>.
     const Irouter = u64;
@@ -136,7 +116,7 @@ pub const Distributor = struct {
 
     /// Set the priority of an interrupt.
     pub fn setPriority(self: Self, id: IntrId, prio: Priority) void {
-        const reg_index: usize = id / 4 * @sizeOf(Priority);
+        const reg_index: usize = id / 4;
         const reg_addr = map.ipriorityr + reg_index * @sizeOf(Ipriorityr);
 
         var reg_value = self.read(reg_addr, Ipriorityr);
@@ -264,6 +244,21 @@ pub const Redistributor = struct {
         const typer = 0x0008;
         /// Redistributor Wake Register.
         const waker = 0x0014;
+
+        /// Interrupt Group Register 0.
+        const igroupr = 0x0001_0080;
+        /// Interrupt Set-Enable Register 0.
+        const isenabler0 = 0x0001_0100;
+        /// Interrupt Clear-Enable Register 0.
+        const icenabler0 = 0x0001_0180;
+        /// Interrupt Group Modifier Register 0.
+        const igrpmodr = 0x0001_0D00;
+        /// Interrupt Priority Registers.
+        const ipriorityr0 = 0x0001_0400;
+        /// PPI Configuration Register 0.
+        const icfgr0 = 0x0001_0C00;
+        /// PPI Configuration Register 1.
+        const icfgr1 = 0x0001_0C04;
     };
 
     /// GICR_CTLR.
@@ -338,6 +333,37 @@ pub const Redistributor = struct {
         impl_defined1: bool,
     };
 
+    /// GICR_IGROUPR<n>.
+    ///
+    /// See GICR_IGRPMODR<n>.
+    const Igroupr = u32;
+
+    /// GICR_IGRPMODR<n>.
+    const Igroupmodr = u32;
+
+    /// GICR_ISENABLER0.
+    const Isenabler = u32;
+
+    /// GICR_ICENABLER0.
+    const Icenabler = u32;
+
+    /// GICR_IPRIORITYR<n>.
+    ///
+    /// Holds the priority of corresponding interrupt.
+    /// Each register holds 4 interrupt priorities.
+    const Ipriorityr = packed struct(u32) {
+        prio0: Priority,
+        prio1: Priority,
+        prio2: Priority,
+        prio3: Priority,
+    };
+
+    /// GICR_ICFGR<0,1>.
+    ///
+    /// Determines whether the corresponding PPI is edge-triggered or level-sensitive.
+    /// Each two bits corresponds to a PPI.
+    const Icfgr = u32;
+
     /// Create a new instance.
     pub fn new(base: PhysRegion) Self {
         const limit = base.addr + base.size;
@@ -397,12 +423,70 @@ pub const Redistributor = struct {
         am.msr(.icc_pmr_el1, pmr);
     }
 
+    /// Enable an interrupt.
+    pub fn enable(self: Self, id: IntrId) void {
+        hugin.rtt.expect(id < 32);
+        self.write(map.isenabler0, hugin.bits.tobit(Isenabler, id));
+    }
+
     /// Set binary point.
     pub fn setBinaryPoint(_: Self, value: u3) void {
         const bpr = std.mem.zeroInit(regs.IccBpr, .{
             .bpr = value,
         });
         am.msr(.icc_bpr1_el1, bpr);
+    }
+
+    /// Set the priority of an interrupt.
+    pub fn setPriority(self: Self, id: IntrId, prio: Priority) void {
+        hugin.rtt.expect(id < 32);
+
+        const reg_index: usize = id / 4;
+        const reg_addr = map.ipriorityr0 + reg_index * @sizeOf(Ipriorityr);
+
+        var reg_value = self.read(reg_addr, Ipriorityr);
+        switch (id % 4) {
+            0 => reg_value.prio0 = prio,
+            1 => reg_value.prio1 = prio,
+            2 => reg_value.prio2 = prio,
+            3 => reg_value.prio3 = prio,
+            else => unreachable,
+        }
+
+        self.write(reg_addr, reg_value);
+    }
+
+    /// Set the interrupt group of an interrupt.
+    pub fn setGroup(self: Self, id: IntrId, group: Group) void {
+        hugin.rtt.expect(id < 32);
+
+        // Set GICR_IGROUPR<n>.
+        const igroupr = self.read(map.igroupr, Igroupr);
+        self.write(map.igroupr, switch (group) {
+            .secure_grp0, .secure_grp1 => hugin.bits.unset(igroupr, id),
+            .ns_grp1 => hugin.bits.set(igroupr, id),
+            .reserved => unreachable,
+        });
+
+        // Set GICR_IGRPMODR<n>.
+        const igrpmodr = self.read(map.igrpmodr, Igroupmodr);
+        self.write(map.igrpmodr, switch (group) {
+            .secure_grp0, .ns_grp1 => hugin.bits.unset(igrpmodr, id),
+            .secure_grp1 => hugin.bits.set(igrpmodr, id),
+            .reserved => unreachable,
+        });
+    }
+
+    /// Set the trigger type of an interrupt.
+    pub fn setTrigger(self: Self, id: IntrId, trigger: Trigger) void {
+        hugin.rtt.expect(id < 32);
+
+        const cfgr_addr: usize = if (id < 16) map.icfgr0 else map.icfgr1;
+        const nth: u5 = @intCast((id % 16) * 2);
+        const icfgr = self.read(cfgr_addr, Icfgr);
+        const mask: Icfgr = @as(Icfgr, 0b11) << nth;
+        const newval = (icfgr & ~mask) | (@as(Icfgr, @intFromEnum(trigger)) << nth);
+        self.write(cfgr_addr, newval);
     }
 
     /// Write to a register.
@@ -429,6 +513,26 @@ pub const Redistributor = struct {
             std.atomic.spinLoopHint();
         }
     }
+};
+
+/// Interrupt group.
+///
+/// (modifier, group):
+/// - (0, 0): Secure Group 0
+/// - (0, 1): Non-secure Group 1
+/// - (1, 0): Secure Group 1
+/// - (1, 1): Reserved.
+const Group = enum(u2) {
+    secure_grp0 = 0,
+    ns_grp1 = 1,
+    secure_grp1 = 2,
+    reserved = 3,
+};
+
+/// Interrupt trigger type.
+const Trigger = enum(u2) {
+    level = 0b00,
+    edge = 0b10,
 };
 
 // =============================================================

@@ -8,6 +8,7 @@ pub const SystemReg = enum {
     spsr_el2,
     spsr_el3,
     hcr_el2,
+    cnthctl_el2,
     id_aa64mmfr0_el1,
     vtcr_el2,
     vttbr_el2,
@@ -32,6 +33,9 @@ pub const SystemReg = enum {
     vpidr_el2,
     mpidr_el1,
     vmpidr_el2,
+    cntvoff_el2,
+
+    icc_ctlr_el1,
     icc_sre_el1,
     icc_sre_el2,
     icc_sre_el3,
@@ -73,6 +77,7 @@ pub const SystemReg = enum {
             .elr_el1, .elr_el2, .elr_el3 => Elr,
             .spsr_el1, .spsr_el2, .spsr_el3 => Spsr,
             .hcr_el2 => HcrEl2,
+            .cnthctl_el2 => Cnthctl,
             .id_aa64mmfr0_el1 => IdAa64Mmfr0,
             .vtcr_el2 => VtcrEl2,
             .vttbr_el2 => VttbrEl2,
@@ -86,6 +91,8 @@ pub const SystemReg = enum {
             .vpidr_el2 => Vpidr,
             .mpidr_el1 => Mpidr,
             .vmpidr_el2 => Vmpidr,
+            .cntvoff_el2 => Cntvoff,
+            .icc_ctlr_el1 => IccCtlr,
             .icc_sre_el1, .icc_sre_el2, .icc_sre_el3 => IccSre,
             .icc_pmr_el1 => IccPmr,
             .icc_bpr0_el1, .icc_bpr1_el1 => IccBpr,
@@ -379,6 +386,48 @@ pub const HcrEl2 = packed struct(u64) {
     /// When FEAT_TWED is implemented TWE Delay.
     /// Otherwise, reserved.
     twedel: u4,
+};
+
+/// CNTHCTL_EL2.
+///
+/// Counter-timer Hypervisor Control Register.
+pub const Cnthctl = packed struct(u64) {
+    /// Traps EL0 accesses to the frequency register and physical counter registers to EL2.
+    el0pcten: bool,
+    /// Traps EL0 accesses to the frequency register and virtual counter registers to EL2.
+    el0vcten: bool,
+    /// Enables the generation of an event stream from CNTPCT_EL0 as seen from EL2.
+    evnten: bool,
+    /// Controls which transition of the CNTPCT_EL0 trigger bit.
+    evntdir: bool,
+    /// Selects which bit of CNTPCT_EL0 is the trigger for the event stream generated from that counter when that stream is enabled.
+    evnti: u4,
+    /// Traps EL0 accesses to the virtual timer registers to EL2.
+    el0vten: bool,
+    /// Traps EL0 accesses to the physical timer registers to EL2.
+    el0pten: bool,
+    /// Traps EL0 and EL1 accesses to the EL1 physical counter registers to EL2.
+    el1pcten: bool,
+    /// Traps EL0 and EL1 accesses to the EL1 physical timer registers to EL2.
+    el1pten: bool,
+    /// Reserved.
+    ecv: bool,
+    /// Reserved.
+    el1tvt: bool,
+    /// Reserved.
+    el1tvct: bool,
+    /// Reserved.
+    el1nvpct: bool,
+    /// Reserved.
+    el1nvvct: bool,
+    /// Reserved.
+    evntis: bool,
+    /// Reserved.
+    cntvmask: bool,
+    /// Reserved.
+    cntpmask: bool,
+    /// Reserved.
+    _reserved: u44 = 0,
 };
 
 /// ID_AA64MMFR0_ELn.
@@ -929,6 +978,55 @@ pub const Mpidr = packed struct(u64) {
 /// Virtualization Multiprocessor ID Register.
 /// This value is returned by EL1 reads of MPIDR_EL1.
 pub const Vmpidr = Mpidr;
+
+/// CNTVOFF_EL2.
+///
+/// Counter-timer Virtual Offset Register.
+pub const Cntvoff = packed struct(u64) {
+    /// Offset value.
+    offset: u64,
+};
+
+/// ICC_CTLR_EL1.
+///
+/// Interrupt Controller Control Register.
+pub const IccCtlr = packed struct(u64) {
+    /// Common Binary Point Register.
+    cbpr: u1,
+    /// EOI mode for the current Security state.
+    ///
+    /// Controls whether a write to an EOI register also deactivates the interrupt.
+    eoimode: EoiMode,
+    /// Reserved.
+    _reserved0: u4 = 0,
+    /// Priority Mask Hint Enable.
+    pmhe: bool,
+    /// Reserved.
+    _reserved1: u1 = 0,
+    /// Priority bits.
+    pribits: u3,
+    /// Identifier bits.
+    idbits: u3,
+    /// SEI Support.
+    seis: bool,
+    /// Affinity 3 Valid.
+    a3v: bool,
+    /// Reserved.
+    _reserved2: u2 = 0,
+    /// Range Selector Support.
+    rss: u1,
+    /// Extended INTID range.
+    extrange: u1,
+    /// Reserved.
+    _reserved3: u44 = 0,
+
+    const EoiMode = enum(u1) {
+        /// Write to an EOI register both drop priority and deactivate the interrupt.
+        deactivates = 0,
+        /// Write to an EOI register only drops priority. ICC_DIR_EL1 provides a way to deactivate the interrupt.
+        no_deactivate = 1,
+    };
+};
 
 /// ICC_SRE_ELx.
 ///

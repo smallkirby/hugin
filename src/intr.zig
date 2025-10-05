@@ -14,11 +14,11 @@ var dist: hugin.arch.gicv3.Distributor = undefined;
 var redist: hugin.arch.gicv3.Redistributor = undefined;
 
 /// Base interrupt ID of SGI.
-const sgi_base = 0;
+pub const sgi_base = 0;
 /// Base interrupt ID of PPI.
-const ppi_base = 16;
+pub const ppi_base = 16;
 /// Base interrupt ID of SPI.
-const spi_base = 32;
+pub const spi_base = 32;
 
 /// Maximum number of interrupt handlers
 pub const max_num_handlers = 256;
@@ -71,7 +71,11 @@ pub fn enable(offset: IntrId, kind: Kind, handler: Handler) IntrError!void {
     handlers[vector] = handler;
 
     // Enable interrupt in GIC.
-    hugin.arch.enableIntr(vector, dist);
+    switch (kind) {
+        .spi => arch.enableDistIntr(vector, dist),
+        .ppi => arch.enableRedistIntr(vector, redist),
+        .sgi => hugin.unimplemented("Enable SGI"),
+    }
 }
 
 fn unhandledHandler(_: *arch.regs.Context) void {

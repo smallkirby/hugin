@@ -198,6 +198,10 @@ pub const DistributorDevice = struct {
         const isenabler = 0x0100;
         /// Interrupt Clear-Enable Registers.
         const icenabler = 0x0180;
+        /// Interrupt Set-Pending Registers.
+        const ispendr = 0x0200;
+        /// Interrupt Clear-Pending Registers.
+        const icpendr = 0x0280;
         /// Interrupt Clear-Active Registers.
         const icactiver = 0x380;
         /// Interrupt Priority Registers.
@@ -206,10 +210,6 @@ pub const DistributorDevice = struct {
         const icfgr = 0x0C00;
         /// Interrupt Group Modifier Registers.
         const igrpmodr = 0x0D00;
-        /// Interrupt Set-Pending Registers.
-        const ispendr = 0x0200;
-        /// Interrupt Clear-Pending Registers.
-        const icpendr = 0x0280;
         /// Interrupt Routing Registers.
         const irouter = 0x6000;
         //// Distributor Peripheral ID2 Register.
@@ -403,6 +403,7 @@ pub const RedistributorDevice = struct {
     group: u32,
     enable: u32,
     pending: u32,
+    config: [2]u32,
     prio: [8]Ipriorityr,
 
     const handler = hugin.vm.MmioDevice.Handler{
@@ -460,6 +461,17 @@ pub const RedistributorDevice = struct {
             map.pidr2 => blk: {
                 try assertWidth(width, .word);
                 break :blk Register{ .word = @bitCast(Pidr2{}) };
+            },
+
+            // GICR_ICFGR0.
+            map.icfgr0 => blk: {
+                try assertWidth(width, .word);
+                break :blk Register{ .word = self.config[0] };
+            },
+            // GICR_ICFGR1.
+            map.icfgr1 => blk: {
+                try assertWidth(width, .word);
+                break :blk Register{ .word = self.config[1] };
             },
 
             else => {
@@ -521,6 +533,17 @@ pub const RedistributorDevice = struct {
                 self.prio[idx] = @bitCast(value.word);
             },
 
+            // GICR_ICFGR0.
+            map.icfgr0 => {
+                try assertWidth(value, .word);
+                self.config[0] = value.word;
+            },
+            // GICR_ICFGR1.
+            map.icfgr1 => {
+                try assertWidth(value, .word);
+                self.config[1] = value.word;
+            },
+
             else => {
                 log.err("Unhandled GICv3 Redistributor write at offset 0x{X}", .{offset});
                 return Error.Unimplemented;
@@ -558,6 +581,10 @@ pub const RedistributorDevice = struct {
         const icactiver0 = 0x0001_0380;
         /// Interrupt Priority Registers.
         const ipriorityr0 = 0x0001_0400;
+        /// PPI Configuration Register 0.
+        const icfgr0 = 0x0001_0C00;
+        /// PPI Configuration Register 1.
+        const icfgr1 = 0x0001_0C04;
     };
 
     /// GICR_CTLR.
@@ -659,6 +686,12 @@ pub const RedistributorDevice = struct {
         prio2: Priority,
         prio3: Priority,
     };
+
+    /// GICR_ICFGR1.
+    ///
+    /// Determines whether the corresponding PPI is edge-triggered or level-sensitive.
+    /// Each two bits corresponds to a PPI.
+    const Icfgr1 = u32;
 };
 
 /// Check access width.

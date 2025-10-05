@@ -2,10 +2,16 @@ extern const exception_table: *void;
 
 /// Setup exception handlers for EL2.
 pub fn init() void {
+    // Set vector base address.
     const vbar = regs.Vbar{
         .addr = @intFromPtr(&exception_table),
     };
     am.msr(.vbar_el2, vbar);
+
+    // Setup GIC CPU interface.
+    var ctlr = am.mrs(.icc_ctlr_el1);
+    ctlr.eoimode = .deactivates;
+    am.msr(.icc_ctlr_el1, ctlr);
 }
 
 /// IRQ handler for EL2.

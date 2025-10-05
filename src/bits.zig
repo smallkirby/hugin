@@ -12,6 +12,19 @@ pub fn toBigEndian(value: anytype) @TypeOf(value) {
     return fromBigEndian(value);
 }
 
+/// Set the integer where only the nth bit is set.
+///
+/// - `T`   : Type of the integer.
+/// - `nth` : The bit position to set.
+pub fn tobit(T: type, nth: anytype) T {
+    const val = switch (@typeInfo(@TypeOf(nth))) {
+        .int, .comptime_int => nth,
+        .@"enum" => @intFromEnum(nth),
+        else => @compileError("setbit: invalid type"),
+    };
+    return @as(T, 1) << @intCast(val);
+}
+
 /// Round up the value to the given alignment.
 ///
 /// If the type of `value` is a comptime integer, it's regarded as `usize`.
@@ -213,6 +226,12 @@ fn RepInt(T: type) type {
 // =============================================================
 
 const testing = std.testing;
+
+test "tobit" {
+    try testing.expectEqual(0b0000_0001, tobit(u8, 0));
+    try testing.expectEqual(0b0001_0000, tobit(u8, 4));
+    try testing.expectEqual(0b1000_0000, tobit(u8, 7));
+}
 
 test "concat" {
     try testing.expectEqual(0b10, concat(u2, @as(u1, 1), @as(u1, 0)));
