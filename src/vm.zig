@@ -1,6 +1,10 @@
 pub const Error = error{
     NotFound,
-} || hugin.mem.PageAllocator.Error || hugin.mmio.MmioError || hugin.Fat32.Error;
+} ||
+    hugin.mem.PageAllocator.Error ||
+    hugin.mmio.MmioError ||
+    hugin.intr.IntrError ||
+    hugin.Fat32.Error;
 
 /// List of VMs.
 var vms: SinglyLinkedList = .{};
@@ -55,6 +59,7 @@ pub const Vm = struct {
         var device = self.devices.first;
         while (device) |dev| : (device = dev.next) {
             const mdev: *MmioDevice = @fieldParentPtr("_node", dev);
+            if (!mdev.include(addr)) continue;
             const offset = addr - mdev.base;
 
             return mdev.handler.read(mdev.ctx, offset, width) catch |err| {
@@ -72,6 +77,7 @@ pub const Vm = struct {
         var device = self.devices.first;
         while (device) |dev| : (device = dev.next) {
             const mdev: *MmioDevice = @fieldParentPtr("_node", dev);
+            if (!mdev.include(addr)) continue;
             const offset = addr - mdev.base;
 
             return mdev.handler.write(mdev.ctx, offset, value) catch |err| {
@@ -113,6 +119,11 @@ pub const MmioDevice = struct {
         /// Write to the MMIO device.
         write: *const fn (ctx: *anyopaque, offset: usize, value: mmio.Register) MmioError!void,
     };
+
+    /// Check if the given address is within the MMIO device range.
+    pub fn include(self: *const MmioDevice, addr: usize) bool {
+        return self.base <= addr and addr < self.base + self.len;
+    }
 };
 
 /// Initialize the VM subsystem.
@@ -142,6 +153,11 @@ pub fn init(fat: hugin.Fat32) Error!void {
             ipabase,
             @intFromPtr(pram.ptr),
         });
+    }
+
+    // Init vGIC
+    {
+        try hugin.vgic.init();
     }
 
     // Setup hypervisor configuration.
@@ -222,6 +238,21 @@ pub fn init(fat: hugin.Fat32) Error!void {
             0x1000,
         );
         vm.devices.prepend(&pl011.interface._node);
+    }
+    {
+        const gicd = try mmio.gicv3.DistributorDevice.new(
+            allocator,
+            0x0800_0000, // TODO: need mechanism to sync with dts
+            0x10000,
+        );
+        vm.devices.prepend(&gicd.interface._node);
+
+        const gicr = try mmio.gicv3.RedistributorDevice.new(
+            allocator,
+            0x080A_0000, // TODO: need mechanism to sync with dts
+            0x20000,
+        );
+        vm.devices.prepend(&gicr.interface._node);
     }
 }
 

@@ -1,8 +1,11 @@
+pub const gicv3 = @import("mmio/gicv3.zig");
 pub const pl001 = @import("mmio/pl011.zig");
 
 pub const MmioError = error{
     /// Memory allocation failed.
     OutOfMemory,
+    /// Read or write access with invalid width.
+    InvalidWidth,
     /// Feature is not implemented.
     Unimplemented,
 };

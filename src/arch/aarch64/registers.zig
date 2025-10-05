@@ -41,6 +41,25 @@ pub const SystemReg = enum {
     icc_igrpen1_el1,
     icc_iar1_el1,
     icc_eoir1_el1,
+    icc_lr0_el1,
+    icc_lr1_el1,
+    icc_lr2_el1,
+    icc_lr3_el1,
+    icc_lr4_el1,
+    icc_lr5_el1,
+    icc_lr6_el1,
+    icc_lr7_el1,
+    icc_lr8_el1,
+    icc_lr9_el1,
+    icc_lr10_el1,
+    icc_lr11_el1,
+    icc_lr12_el1,
+    icc_lr13_el1,
+    icc_lr14_el1,
+    icc_lr15_el1,
+    ich_vtr_el2,
+    ich_eisr_el2,
+    ich_hcr_el2,
 
     /// Get the string representation of the system register.
     pub fn str(comptime self: SystemReg) []const u8 {
@@ -73,6 +92,10 @@ pub const SystemReg = enum {
             .icc_igrpen1_el1 => IccIgrpen1El1,
             .icc_iar1_el1 => IccIar1El1,
             .icc_eoir1_el1 => IccEoir1El1,
+            .icc_lr0_el1, .icc_lr1_el1, .icc_lr2_el1, .icc_lr3_el1, .icc_lr4_el1, .icc_lr5_el1, .icc_lr6_el1, .icc_lr7_el1, .icc_lr8_el1, .icc_lr9_el1, .icc_lr10_el1, .icc_lr11_el1, .icc_lr12_el1, .icc_lr13_el1, .icc_lr14_el1, .icc_lr15_el1 => IccLr,
+            .ich_vtr_el2 => IchVtr,
+            .ich_eisr_el2 => IchEisr,
+            .ich_hcr_el2 => IchHcr,
         };
     }
 };
@@ -972,6 +995,126 @@ pub const IccEoir1El1 = packed struct(u64) {
     intid: u24,
     /// Reserved.
     _reserved: u40 = 0,
+};
+
+/// ICC_LR<n>_EL2.
+///
+/// Interrupt Controller List Registers, n = 0-15.
+/// Provides interrupt context information for the virtual CPU interface.
+pub const IccLr = packed struct(u64) {
+    /// Virtual INTID of the interrupt.
+    vintid: u32,
+    /// Physical INTID, for hardware interrupts.
+    pintid: u13,
+    /// Reserved.
+    _reserved0: u3 = 0,
+    /// The priority of the interrupt.
+    prio: u8,
+    /// Reserved.
+    _reserved1: u3 = 0,
+    /// Indicates whether the virtual priority has the non-maskable property.
+    nmi: bool,
+    /// Indicates the group for this virtual interrupt.
+    group: u1,
+    /// Indicates whether this virtual interrupt maps directly to a hardware interrupt.
+    ///
+    /// Deactivation of the virtual interrupt also causes the deactivation of the physical interrupt with the pINTID.
+    hw: bool,
+    /// The state of the interrupt.
+    state: State,
+
+    const State = enum(u2) {
+        /// Inactive.
+        inactive = 0b00,
+        /// Pending.
+        pending = 0b01,
+        /// Active.
+        active = 0b10,
+        /// Pending and Active.
+        pending_active = 0b11,
+    };
+};
+
+/// ICH_VTR_EL2.
+///
+/// Interrupt Controller VGIC Type Register.
+/// Reports supported GIC virtualization features.
+pub const IchVtr = packed struct(u64) {
+    /// List Registers.
+    ///
+    /// Indicates the number of List registers implemented, minus one.
+    list_regs: u5,
+    /// Reserved.
+    _reserved0: u13 = 0,
+    /// Masking of directly-injected virtual interrupts.
+    dvim: bool,
+    /// Separate trapping of EL1 writes to ICV_DIR_EL1 supported.
+    tds: bool,
+    /// Direct injection of virtual interrupts not supported.
+    nv4: bool,
+    /// Affinity 3 Valid.
+    a3v: bool,
+    /// SEI Support.
+    seis: bool,
+    /// The number of virtual interrupt identifier bits supported.
+    idbits: u3,
+    /// Preemption bits.
+    prebits: u3,
+    /// Priority bits.
+    pribits: u3,
+    /// Reserved.
+    _reserved1: u32 = 0,
+};
+
+/// ICH_EISR_EL2.
+///
+/// Interrupt Controller End of Interrupt Status Register.
+/// Indicates which List registers have outstanding EOI maintenance interrupts.
+pub const IchEisr = packed struct(u64) {
+    /// EOI maintenance interrupt status bit for List register <n>.
+    status: u16,
+    /// Reserved.
+    _reserved: u48 = 0,
+};
+
+/// ICH_HCR.
+///
+/// Interrupt Controller Hypervisor Control Register.
+pub const IchHcr = packed struct(u32) {
+    /// Enable.
+    en: bool,
+    /// Underflow Interrupt Enable.
+    uie: bool,
+    /// List Register Entry Not Present Interrupt Enable.
+    lrenpie: bool,
+    /// No Pending Interrupt Enable.
+    npie: bool,
+    /// VM Group 0 Enabled Interrupt Enable.
+    vgrp0eie: bool,
+    /// VM Group 0 Disabled Interrupt Enable.
+    vgrp0die: bool,
+    /// VM Group 1 Enabled Interrupt Enable.
+    vgrp1eie: bool,
+    /// VM Group 1 Disabled Interrupt Enable.
+    vgrp1die: bool,
+    /// Reserved.
+    vsgieoic: bool,
+    /// Reserved.
+    _reserved0: u1 = 0,
+    /// Trap all Non-secure EL1 accesses to System registers that are common to Group 0 and Group 1 to EL2.
+    tc: bool,
+    /// Trap all Non-secure EL1 accesses to ICC_* and ICV_* system registers for Group0 interrupts to EL2.
+    tall0: bool,
+    /// Trap all Non-secure EL1 accesses to ICC_* and ICV_* system registers for Group1 interrupts to EL2.
+    tall1: bool,
+    /// Trap all locally generated SEIs.
+    tsei: bool,
+    /// Trap Non-secure EL1 writes to ICC_DIR and ICV_DIR.
+    tdir: bool,
+    /// Reserved.
+    _reserved1: u12 = 0,
+    /// This field is incremented whenever a successful write to a virtual EOIR or DIR register would have resulted in a virtual interrupt deactivation.
+    eoic: u5,
 };
 
 // =============================================================
