@@ -1,19 +1,9 @@
-/// Interrupt ID offset of Maintenance Interrupt within PPI.
-const intid_maintenance = 9;
-
 /// Initialize vGIC.
 pub fn init() hugin.intr.IntrError!void {
     // Global enable vGIC.
-    {
-        arch.am.msr(.ich_hcr_el2, std.mem.zeroInit(arch.regs.IchHcr, .{
-            .en = true,
-        }));
-    }
-
-    // Register Maintenance Interrupt handler.
-    {
-        try intr.enable(intid_maintenance, .ppi, mintrHandler);
-    }
+    arch.am.msr(.ich_hcr_el2, std.mem.zeroInit(arch.regs.IchHcr, .{
+        .en = true,
+    }));
 }
 
 /// Register a virtual interrupt entry to the vGIC.
@@ -47,18 +37,6 @@ pub fn pushVintr(intid: intr.IntrId, group: u1, prio: intr.Priority, pintid: ?in
     }
 
     @panic("No available List Register.");
-}
-
-/// Handler for a maintaenance interrupt that's asserted, in Hugin, when a virtual interrupt is deactivated.
-fn mintrHandler(_: *arch.regs.Context) bool {
-    const num_lrn: usize = arch.am.mrs(.ich_vtr_el2).list_regs + 1;
-    const normed_num_lrn = @min(num_lrn, num_lrns);
-
-    for (0..normed_num_lrn) |_| {
-        hugin.unimplemented("mintrHandler");
-    }
-
-    return true;
 }
 
 /// Number of ICC_LRn_EL1 registers.
