@@ -28,11 +28,11 @@ pub const block_size = 512;
 pub const block_mask = block_size - 1;
 
 /// Status success.
-const status_ok = 0;
+pub const status_ok = 0;
 /// Status for device or driver error.
-const status_ioerr = 1;
+pub const status_ioerr = 1;
 /// Status for a request unsupported by the device.
-const status_unsupp = 2;
+pub const status_unsupp = 2;
 
 /// Base address of MMIO Virtio Block Device.
 vreg: virtio.Register,
@@ -124,7 +124,7 @@ pub fn read(self: *Self, buffer: []u8, addr: u64) Error!void {
 /// - `buffer`: The buffer to write from.
 /// - `addr`: The block address to write to.
 pub fn write(self: *Self, buffer: []const u8, addr: u64) Error!void {
-    return self.operate(buffer, addr, .write);
+    return self.operate(@constCast(buffer), addr, .write);
 }
 
 const Operation = enum {
@@ -225,7 +225,7 @@ fn operate(self: *Self, buffer: []u8, addr: u64, op: Operation) Error!void {
 /// Virtio Block Request.
 ///
 /// This is a device-readonly part of the request, followed by device-write-only data and status.
-const Request = extern struct {
+pub const Request = extern struct {
     /// Request type.
     type: Type,
     /// Reserved.

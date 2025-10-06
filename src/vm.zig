@@ -95,6 +95,11 @@ pub const Vm = struct {
         @panic("Abort.");
     }
 
+    /// Inject an interrupt using a Distributor.
+    pub fn injectInterrupt(self: *Self, intid: intr.IntrId, pintid: ?intr.IntrId) void {
+        self.gicdist.inject(intid, pintid);
+    }
+
     /// Convert an guest physical address to host physical (= virtual) address.
     pub fn ipa2pa(self: *const Self, ipa: usize) Phys {
         if (ipa < self.ram_gpabase or ipa >= self.ram_gpabase + self.ram_size) {
@@ -284,6 +289,7 @@ pub fn init(fat: hugin.Fat32) Error!void {
             0x0A00_0000, // TODO: need mechanism to sync with dts
             0x200,
             file,
+            fat,
         );
         vm.devices.prepend(&vioblk.interface._node);
     }
@@ -335,6 +341,7 @@ const log = std.log.scoped(.vm);
 const hugin = @import("hugin");
 const arch = hugin.arch;
 const bits = hugin.bits;
+const intr = hugin.intr;
 const mmio = hugin.mmio;
 const rtt = hugin.rtt;
 const allocator = hugin.mem.general_allocator;

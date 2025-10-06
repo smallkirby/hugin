@@ -395,7 +395,7 @@ pub const FileInfo = struct {
 /// Returns the number of bytes read.
 /// If the end of the file is reached before filling the buffer, the number of bytes read will be less than `buffer.len`.
 pub fn read(self: Self, file: FileInfo, buffer: []u8, offset: usize, palloc: PageAllocator) Error!usize {
-    const size = if (offset + buffer.len < file.size) blk: {
+    const size = if (file.size <= offset + buffer.len) blk: {
         if (file.size <= offset) return 0;
         break :blk file.size - offset;
     } else buffer.len;
@@ -404,7 +404,7 @@ pub fn read(self: Self, file: FileInfo, buffer: []u8, offset: usize, palloc: Pag
     const clus_to_skip = offset / bytes_per_clus;
     var bytes_skipped: usize = 0;
 
-    // Allocate an aligned buffer for reading sectors.
+    // Allocate an aligned buffer for reading all sectors in a cluster.
     const tmpbuf_size = hugin.bits.roundup(bytes_per_clus, hugin.mem.page_size);
     const tmpbuf = try palloc.allocPages(
         hugin.bits.roundup(tmpbuf_size, hugin.mem.page_size) >> hugin.mem.page_shift,
@@ -432,8 +432,9 @@ pub fn read(self: Self, file: FileInfo, buffer: []u8, offset: usize, palloc: Pag
 
         // Copy data to the user buffer.
         const sec_offset = if (bytes_skipped < offset) blk: {
+            const ret = offset - bytes_skipped;
             bytes_skipped = offset;
-            break :blk offset - bytes_skipped;
+            break :blk ret;
         } else 0;
         const size_to_copy = @min(size - num_read, bytes_per_clus - sec_offset);
         @memcpy(
@@ -449,6 +450,80 @@ pub fn read(self: Self, file: FileInfo, buffer: []u8, offset: usize, palloc: Pag
 
     hugin.rtt.expectEqual(size, num_read);
     return num_read;
+}
+
+/// Write a file described by `file` from `buffer` starting from `offset`.
+///
+/// - `file`: Information about the file to write.
+/// - `buffer`: Buffer to write from. The buffer does not have to be aligned.
+/// - `offset`: Offset in bytes from the beginning of the file to start writing.
+/// - `palloc`: Page allocator to allocate internal buffers.
+///
+/// Returns the number of bytes written.
+/// If the end of the file is reached before writing all data, the number of bytes written will be less than `buffer.len`.
+pub fn write(self: Self, file: FileInfo, buffer: []u8, offset: usize, palloc: PageAllocator) Error!usize {
+    const size = if (file.size <= offset + buffer.len) blk: {
+        if (file.size <= offset) return 0;
+        break :blk file.size - offset;
+    } else buffer.len;
+
+    const bytes_per_clus = self.sec_per_clus * self.bytes_per_sec;
+    const clus_to_skip = offset / bytes_per_clus;
+    var bytes_skipped: usize = 0;
+
+    // Allocate an aligned buffer for reading all sectors in a cluster.
+    const tmpbuf_size = hugin.bits.roundup(bytes_per_clus, hugin.mem.page_size);
+    const tmpbuf = try palloc.allocPages(
+        hugin.bits.roundup(tmpbuf_size, hugin.mem.page_size) >> hugin.mem.page_shift,
+    );
+    defer palloc.freePages(tmpbuf);
+
+    // Skip clusters for offset.
+    var iter = ClusterIter.new(self.fat, file.cluster);
+    for (0..clus_to_skip) |_| {
+        if (iter.next() == null) {
+            return Error.InvalidArgument;
+        }
+        bytes_skipped += bytes_per_clus;
+    }
+
+    // Write to clusters.
+    var num_written: usize = 0;
+    while (iter.next()) |clus| {
+        // Read all sectors in the cluster.
+        try self.readSectors(
+            tmpbuf,
+            self.clus2sec(clus),
+            self.sec_per_clus,
+        );
+
+        // Copy data from the user buffer.
+        const sec_offset = if (bytes_skipped < offset) blk: {
+            const ret = offset - bytes_skipped;
+            bytes_skipped = offset;
+            break :blk ret;
+        } else 0;
+        const size_to_copy = @min(size - num_written, bytes_per_clus - sec_offset);
+        @memcpy(
+            tmpbuf[sec_offset .. sec_offset + size_to_copy],
+            buffer[num_written .. num_written + size_to_copy],
+        );
+
+        // Write all sectors in the cluster.
+        try self.writeSectors(
+            tmpbuf,
+            self.clus2sec(clus),
+            self.sec_per_clus,
+        );
+
+        num_written += size_to_copy;
+        if (num_written >= size) {
+            break;
+        }
+    }
+
+    hugin.rtt.expectEqual(size, num_written);
+    return num_written;
 }
 
 /// Find a file by its name.
@@ -493,6 +568,17 @@ fn readSectors(self: Self, buffer: []u8, sec: Sector, count: u32) Error!void {
     }
 
     return self.vblk.read(buffer, addr);
+}
+
+/// Write `count` sectors starting from `sec` from `buffer`.
+fn writeSectors(self: Self, buffer: []const u8, sec: Sector, count: u32) Error!void {
+    const addr = (self.base * self.lbasize) + (sec * self.bytes_per_sec);
+    const size = count * self.bytes_per_sec;
+    if (buffer.len < size) {
+        return Error.InvalidArgument;
+    }
+
+    return self.vblk.write(buffer, addr);
 }
 
 /// Get root directory entries.
