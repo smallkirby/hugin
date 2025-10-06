@@ -109,6 +109,13 @@ pub const DistributorDevice = struct {
                 break :blk Register{ .word = self.pending[idx] };
             },
 
+            // GICD_ICFGR<n>.
+            map.icfgr...map.icfgr + @sizeOf(@TypeOf(self.icfgr)) - 1 => blk: {
+                try assertWidth(width, .word);
+                const idx = (offset - map.icfgr) / @sizeOf(Icfgr);
+                break :blk Register{ .word = self.icfgr[idx] };
+            },
+
             // GICD_PIDR2.
             map.pidr2 => blk: {
                 try assertWidth(width, .word);
@@ -138,6 +145,19 @@ pub const DistributorDevice = struct {
                 try assertWidth(value, .word);
                 const idx = (offset - map.igroupr) / @sizeOf(Igroupr);
                 self.igroupr[idx] = value.word;
+            },
+
+            // GICD_ISENABLER<n>.
+            map.isenabler...map.isenabler + @sizeOf(@TypeOf(self.enable)) - 1 => {
+                try assertWidth(value, .word);
+                const idx = (offset - map.isenabler) / @sizeOf(Isenabler);
+                self.enable[idx] |= value.word;
+
+                for (0..32) |i| {
+                    if (bits.isset(value.word, i) and bits.isset(self.pending[idx], i)) {
+                        self.inject(@intCast(idx * 32 + i), null);
+                    }
+                }
             },
 
             // GICD_ICENABLER<n>.
@@ -182,6 +202,103 @@ pub const DistributorDevice = struct {
         }
     }
 
+    /// Inject a virtual interrupt.
+    pub fn inject(self: *Self, intid: intr.IntrId, pintid: ?intr.IntrId) void {
+        // Distributor not enabled.
+        if (!self.ctlr.enable_grp1) {
+            log.warn("Ignoring interrupt injection since Distributor is disabled.", .{});
+            return;
+        }
+
+        // Push to pending state.
+        self.setPendingStatus(intid, true);
+
+        // Check whether the interrupt can be injected.
+        if (!self.isEnabled(intid)) {
+            log.warn("Interrupt#{d} is not enabled, skipping injection.", .{intid});
+            return;
+        }
+        if (self.getGroupMod(intid) == 1) {
+            log.warn("Interrupt#{d} is Group 1 Secure, skipping injection.", .{intid});
+            return;
+        }
+        if (!self.ctlr.are_ns) {
+            log.warn("Affinity routing is disabled, skipping injection.", .{});
+            return;
+        }
+
+        const grp = self.getGroup(intid);
+        const prio = self.getPriority(intid);
+        const router = self.irouter[intid];
+
+        if (router2affinity(router) == arch.am.mrs(.mpidr_el1).packedAffinity()) {
+            // Injection to the same PE.
+            hugin.vgic.pushVintr(
+                intid,
+                grp,
+                prio,
+                pintid,
+            );
+        } else {
+            hugin.unimplemented("DistributorDevice.inject to other PE");
+        }
+    }
+
+    /// Set pending status of an interrupt.
+    fn setPendingStatus(self: *Self, intid: intr.IntrId, pending: bool) void {
+        const idx: usize = intid / 32;
+        const bit: u5 = @intCast(intid % 32);
+
+        if (pending) {
+            self.pending[idx] = bits.set(self.pending[idx], bit);
+        } else {
+            self.pending[idx] = bits.unset(self.pending[idx], bit);
+        }
+    }
+
+    /// Get group of an interrupt.
+    fn getGroup(self: *Self, intid: intr.IntrId) u1 {
+        const idx: usize = intid / 32;
+        const bit: u5 = @intCast(intid % 32);
+
+        return @intCast((self.igroupr[idx] >> bit) & 0x1);
+    }
+
+    /// Get group modifier of an interrupt.
+    fn getGroupMod(self: *Self, intid: intr.IntrId) u2 {
+        const idx: usize = intid / 32;
+        const bit: u5 = @intCast(intid % 32);
+
+        return @intCast(self.igrpmodr[idx] >> bit);
+    }
+
+    /// Get priority of an interrupt.
+    fn getPriority(self: *Self, intid: intr.IntrId) Priority {
+        const prio = self.ipriorityr[intid / 4];
+        return switch (intid % 4) {
+            0 => prio.prio0,
+            1 => prio.prio1,
+            2 => prio.prio2,
+            3 => prio.prio3,
+            else => unreachable,
+        };
+    }
+
+    /// Check if an interrupt is enabled.
+    fn isEnabled(self: *Self, intid: intr.IntrId) bool {
+        const idx: usize = intid / 32;
+        const bit = intid % 32;
+
+        return bits.isset(self.enable[idx], bit);
+    }
+
+    /// Convert GICD_IROUTER value to 32-bit affinity value.
+    fn router2affinity(router: Irouter) u32 {
+        const aff210: u32 = @intCast(router & 0xFF_FF_FF);
+        const aff3: u32 = @intCast((router >> 32) & 0xFF);
+        return (aff3 << 24) | aff210;
+    }
+
     /// Register map.
     const map = struct {
         /// Distributor Control Register.
@@ -211,7 +328,7 @@ pub const DistributorDevice = struct {
         /// Interrupt Group Modifier Registers.
         const igrpmodr = 0x0D00;
         /// Interrupt Routing Registers.
-        const irouter = 0x6000;
+        const irouter = 0x6100;
         //// Distributor Peripheral ID2 Register.
         const pidr2 = 0xFFE8;
     };

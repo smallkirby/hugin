@@ -11,7 +11,7 @@ pub const legacy_version: u32 = 0x00000001;
 pub const Register = struct {
     base: usize,
 
-    const Map = enum(usize) {
+    pub const Map = enum(usize) {
         /// Magic value.
         magic = 0x000,
         /// Device version number.
@@ -40,6 +40,8 @@ pub const Register = struct {
         queue_align = 0x03c,
         /// Guest physical page number of the virtqueue.
         queue_pfn = 0x040,
+        /// Virtqueue ready.
+        queue_ready = 0x044,
         /// Queue notifier.
         queue_notify = 0x050,
         /// Interrupt status.
@@ -48,10 +50,16 @@ pub const Register = struct {
         interrupt_ack = 0x064,
         /// Device status.
         status = 0x070,
+
+        /// Configuration space.
+        config = 0x100,
+
+        _,
     };
 
     /// Status field values.
     pub const Status = struct {
+        pub const reset: u32 = 0;
         pub const ack: u32 = 1;
         pub const driver: u32 = 2;
         pub const driver_ok: u32 = 4;

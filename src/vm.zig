@@ -18,10 +18,10 @@ pub const Vm = struct {
 
     /// VM ID.
     vmid: usize,
-    /// Host virtual address of the memory region allocated for the VM.
-    ram_vbase: Virt,
+    /// Guest physical address of the memory region allocated for the VM.
+    ram_gpabase: Virt,
     /// Host physical address of the memory region allocated for the VM.
-    ram_pbase: Phys,
+    ram_hpabase: Phys,
     /// Size in bytes of the memory region allocated for the VM.
     ram_size: usize,
     /// List of MMIO handlers.
@@ -93,6 +93,15 @@ pub const Vm = struct {
 
         log.err("No MMIO device found for address: 0x{X}", .{addr});
         @panic("Abort.");
+    }
+
+    /// Convert an guest physical address to host physical (= virtual) address.
+    pub fn ipa2pa(self: *const Self, ipa: usize) Phys {
+        if (ipa < self.ram_gpabase or ipa >= self.ram_gpabase + self.ram_size) {
+            log.err("ipa2pa(): IPA 0x{X:0>16} -> (not in RAM)", .{ipa});
+            @panic("Abort.");
+        }
+        return self.ram_hpabase + (ipa - self.ram_gpabase);
     }
 };
 
@@ -190,8 +199,8 @@ pub fn init(fat: hugin.Fat32) Error!void {
     const vm = try allocator.create(Vm);
     vm.* = Vm{
         .vmid = vmid,
-        .ram_vbase = ipabase,
-        .ram_pbase = @intFromPtr(pram.ptr),
+        .ram_gpabase = ipabase,
+        .ram_hpabase = @intFromPtr(pram.ptr),
         .ram_size = pram.len,
         .devices = .{},
         .kernel = undefined,
@@ -267,6 +276,16 @@ pub fn init(fat: hugin.Fat32) Error!void {
         );
         vm.devices.prepend(&gicr.interface._node);
         vm.gicredist = gicr;
+    }
+    {
+        const file = try fat.lookup("DISK0") orelse return Error.NotFound;
+        const vioblk = try mmio.vioblk.VioblkDevice.new(
+            allocator,
+            0x0A00_0000, // TODO: need mechanism to sync with dts
+            0x200,
+            file,
+        );
+        vm.devices.prepend(&vioblk.interface._node);
     }
 }
 

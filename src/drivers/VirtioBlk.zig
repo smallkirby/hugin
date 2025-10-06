@@ -1,4 +1,6 @@
 //! Virtio Block Device Version 1.3.
+//!
+//! This is a driver-side implementation of Virtio Block Device over MMIO.
 
 const Self = @This();
 const VirtioBlk = Self;
@@ -18,12 +20,12 @@ pub const VirtioBlkError = error{
 } || PageAllocator.Error;
 
 /// Device ID of Virtio Block Device.
-const id_virtio_blk: u32 = 0x2;
+pub const id_virtio_blk: u32 = 0x2;
 
 /// Block size in bytes.
-const block_size = 512;
+pub const block_size = 512;
 /// Block size mask.
-const block_mask = block_size - 1;
+pub const block_mask = block_size - 1;
 
 /// Status success.
 const status_ok = 0;
