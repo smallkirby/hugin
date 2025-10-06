@@ -37,7 +37,10 @@ pub fn writeString(s: []const u8) void {
 
 /// IRQ handler for serial device.
 fn handler(_: *hugin.arch.Context) bool {
-    _ = serial.getc();
+    if (serial.getc()) |c| {
+        const current = hugin.vm.current();
+        current.uart.putc(c, current.gicdist);
+    }
 
     return true;
 }

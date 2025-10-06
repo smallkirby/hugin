@@ -30,6 +30,8 @@ pub const Vm = struct {
     gicdist: *mmio.gicv3.DistributorDevice,
     /// GICv3 Redistributor MMIO device.
     gicredist: *mmio.gicv3.RedistributorDevice,
+    /// PL011 UART MMIO device.
+    uart: *mmio.pl001.Device,
     /// Kernel information.
     kernel: Kernel,
     /// List head of VMs.
@@ -211,6 +213,7 @@ pub fn init(fat: hugin.Fat32) Error!void {
         .kernel = undefined,
         .gicdist = undefined,
         .gicredist = undefined,
+        .uart = undefined,
     };
     vms.prepend(&vm._node);
 
@@ -264,6 +267,7 @@ pub fn init(fat: hugin.Fat32) Error!void {
             0x1000,
         );
         vm.devices.prepend(&pl011.interface._node);
+        vm.uart = pl011;
     }
     {
         const gicd = try mmio.gicv3.DistributorDevice.new(

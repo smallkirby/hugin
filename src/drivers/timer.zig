@@ -40,12 +40,16 @@ pub fn initLocal() Error!void {
     try intr.enable(pintid_offset, .ppi, timerHandler);
 }
 
+var cnt: usize = 0;
+
 /// Timer interrupt handler
 fn timerHandler(_: *arch.regs.Context) bool {
     hugin.vm.current().gicredist.inject(
         vintid,
         pintid_offset + intr.ppi_base,
     );
+    //std.log.debug("timer: {d}", .{cnt});
+    cnt += 1;
 
     // Do not deactivate the interrupt since vGIC does it instead.
     return false;

@@ -1,11 +1,14 @@
 const Error = mmio.MmioError;
 
+/// Interrupt ID for PL011.
+const intid_pl011 = 33;
+
 /// PL011 virtual MMIO device.
 pub const Device = struct {
     /// Flag register.
     flag: Flag,
     /// Interrupt mask.
-    mask: u16,
+    mask: Imsc,
     /// Control register.
     ctl: Control,
     /// Interrupt clear status.
@@ -26,14 +29,9 @@ pub const Device = struct {
     /// Create a new PL011 device instance.
     pub fn new(allocator: Allocator, base: usize, len: usize) Error!*Device {
         const self = try allocator.create(Device);
-        self.* = .{
-            .flag = std.mem.zeroInit(Flag, .{}),
-            .mask = 0,
-            .ctl = std.mem.zeroInit(Control, .{}),
-            .icr = std.mem.zeroInit(Icr, .{}),
-            .rxbuf = undefined,
+        self.* = std.mem.zeroInit(Self, .{
             .interface = initInterface(self, base, len),
-        };
+        });
 
         return self;
     }
@@ -51,12 +49,17 @@ pub const Device = struct {
                 for (1..self.rxbuf.len) |i| {
                     self.rxbuf[i - 1] = self.rxbuf[i];
                 }
+                if (self.rxbuf[0] == 0) {
+                    self.flag.rxfe = true;
+                    self.icr.rxic = false;
+                }
 
                 break :blk Register{ .byte = ret };
             },
             map.fr => Register{ .hword = @bitCast(self.flag) },
             map.cr => Register{ .hword = @bitCast(self.ctl) },
-            map.imsc => Register{ .hword = self.mask },
+            map.imsc => Register{ .hword = @bitCast(self.mask) },
+            map.ris => Register{ .hword = @bitCast(self.icr) },
 
             map.periph_id0 => Register{ .byte = 0x11 },
             map.periph_id1 => Register{ .byte = 0x10 },
@@ -89,8 +92,13 @@ pub const Device = struct {
             map.fbrd => {},
             map.lcr_h => {},
             map.cr => self.ctl = @bitCast(value.hword),
-            map.imsc => self.mask = @intCast(value.hword),
-            map.icr => self.icr = @bitCast(value.hword),
+            map.ifls => {},
+            map.imsc => self.mask = @bitCast(value.hword),
+            map.icr => {
+                const val: u16 = @bitCast(value.hword);
+                const icr: u16 = @bitCast(self.icr);
+                self.icr = @bitCast(icr & ~val);
+            },
 
             else => {
                 log.err("Unhandled PL011 write @ 0x{X}", .{offset});
@@ -99,8 +107,24 @@ pub const Device = struct {
         }
     }
 
+    /// Put a character to the receive FIFO and trigger interrupt if enabled.
+    pub fn putc(self: *Self, c: u8, dist: *mmio.gicv3.DistributorDevice) void {
+        for (&self.rxbuf) |*b| {
+            if (b.* == 0) {
+                b.* = c;
+                break;
+            }
+        }
+        self.flag.rxfe = false;
+
+        if (self.mask.rxim) {
+            self.icr.rxic = true;
+            dist.inject(intid_pl011, null);
+        }
+    }
+
     /// Get the MMIO device interface.
-    pub fn initInterface(self: *Device, base: usize, len: usize) vm.MmioDevice {
+    fn initInterface(self: *Device, base: usize, len: usize) vm.MmioDevice {
         return .{
             .ctx = @ptrCast(self),
             .base = base,
@@ -240,6 +264,34 @@ const Icr = packed struct(u16) {
     beic: bool,
     /// Clear UARTOEINTR.
     oeic: bool,
+    /// Reserved.
+    _reserved: u5 = 0,
+};
+
+/// Interrupt Mask Set/Clear Register.
+const Imsc = packed struct(u16) {
+    /// nUARTRI modem interrupt mask.
+    rimim: bool,
+    /// nUARTCTS modem interrupt mask.
+    ctsmim: bool,
+    /// nUARTDCD modem interrupt mask.
+    dcdmim: bool,
+    /// nUARTDSR modem interrupt mask.
+    dsrmim: bool,
+    /// Receive interrupt mask.
+    rxim: bool,
+    /// Transmit interrupt mask.
+    txim: bool,
+    /// Receive timeout interrupt mask.
+    rtim: bool,
+    /// Framing error interrupt mask.
+    feim: bool,
+    /// Parity error interrupt mask.
+    peim: bool,
+    /// Break error interrupt mask.
+    beim: bool,
+    /// Overrun error interrupt mask.
+    oeim: bool,
     /// Reserved.
     _reserved: u5 = 0,
 };
