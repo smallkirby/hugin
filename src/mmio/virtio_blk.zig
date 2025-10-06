@@ -41,8 +41,8 @@ pub const VioblkDevice = struct {
     /// Status field.
     const Status = virtio.Register.Status;
 
-    /// Maximum number of virtqueues supported.
-    const max_num_queue = 1024;
+    /// Maximum size of a virtqueue supported.
+    const max_size_queue = 1024;
 
     /// Create a new Virtio Block Device driver instance.
     pub fn new(allocator: Allocator, base: usize, len: usize, fs: hugin.Fat32.FileInfo) Error!*Self {
@@ -86,7 +86,7 @@ pub const VioblkDevice = struct {
             .id => Register{ .word = Vblk.id_virtio_blk },
             .vendor => Register{ .word = 0xDEADBEEF },
             .feats => Register{ .word = 0 },
-            .queue_size_max => Register{ .word = max_num_queue },
+            .queue_size_max => Register{ .word = max_size_queue },
             .queue_pfn => if (self.queue_ready) unreachable else Register{ .word = 0 },
             .queue_ready => Register{ .word = @intFromBool(self.queue_ready) },
             .status => Register{ .word = self.status },
