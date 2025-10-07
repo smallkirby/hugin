@@ -43,7 +43,6 @@ pub const Device = struct {
         return switch (offset) {
             map.dr => blk: {
                 const ret = self.rxbuf[0];
-                self.flag.rxfe = true;
 
                 // Shift the FIFO.
                 for (1..self.rxbuf.len) |i| {
@@ -95,9 +94,8 @@ pub const Device = struct {
             map.ifls => {},
             map.imsc => self.mask = @bitCast(value.hword),
             map.icr => {
-                const val: u16 = @bitCast(value.hword);
                 const icr: u16 = @bitCast(self.icr);
-                self.icr = @bitCast(icr & ~val);
+                self.icr = @bitCast(icr & ~value.hword);
             },
 
             else => {
@@ -114,6 +112,8 @@ pub const Device = struct {
                 b.* = c;
                 break;
             }
+        } else {
+            log.warn("PL011 receive FIFO is full, dropping character: {d:>02}", .{c});
         }
         self.flag.rxfe = false;
 
