@@ -12,9 +12,11 @@ pub fn pushVintr(intid: intr.IntrId, group: u1, prio: intr.Priority, pintid: ?in
     const normed_num_lrn = @min(num_lrn, num_lrns);
 
     for (0..normed_num_lrn) |i| {
-        const lr = getListRegister(i);
-        switch (lr.state) {
-            .inactive => return setListRegister(i, .{
+        var lr = getListRegister(i);
+
+        // Empty entry.
+        if (lr.state == .inactive) {
+            return setListRegister(i, .{
                 .vintid = intid,
                 .pintid = if (pintid) |id| id else 0,
                 .prio = prio,
@@ -22,17 +24,13 @@ pub fn pushVintr(intid: intr.IntrId, group: u1, prio: intr.Priority, pintid: ?in
                 .hw = if (pintid) |_| true else false,
                 .state = .pending,
                 .nmi = false,
-            }),
-            .active => return setListRegister(i, .{
-                .vintid = lr.vintid,
-                .pintid = lr.pintid,
-                .prio = lr.prio,
-                .group = lr.group,
-                .hw = lr.hw,
-                .state = .pending,
-                .nmi = false,
-            }),
-            else => continue,
+            });
+        }
+
+        // Same entry.
+        if (lr.vintid == intid) {
+            lr.state = if (lr.state == .active) .pending_active else .pending;
+            return setListRegister(i, lr);
         }
     }
 
