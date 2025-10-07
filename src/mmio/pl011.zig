@@ -14,7 +14,7 @@ pub const Device = struct {
     /// Interrupt clear status.
     icr: Icr,
     /// Receive FIFO.
-    rxbuf: [4]u8,
+    rxbuf: [256]u8,
     /// MMIO device interface.
     interface: vm.MmioDevice,
 
