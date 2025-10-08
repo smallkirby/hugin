@@ -21,6 +21,37 @@ pub const is_runtime_test = options.is_runtime_test;
 /// Git SHA of Hugin kernel.
 pub const sha = options.sha;
 
+/// Console instance.
+var console: Console = .init();
+/// Whether a console is active and accepting input.
+var console_active: std.atomic.Value(bool) = .init(false);
+/// Lock for the console.
+var console_lock: SpinLock = .{};
+
+/// Try to put a character to the console.
+///
+/// If a console is not active, the character is ignored and `false` is returned.
+pub fn put2console(c: u8) bool {
+    if (console_active.load(.acquire)) {
+        const ie = console_lock.lockDisableIrq();
+        defer console_lock.unlockRestoreIrq(ie);
+
+        if (c == Console.key_to_switch) {
+            console_active.store(false, .release);
+            console.deactivate();
+        } else {
+            console.write(c);
+        }
+        return true;
+    } else if (c == Console.key_to_switch) {
+        console.activate();
+        console_active.store(true, .release);
+        return true;
+    } else {
+        return false;
+    }
+}
+
 /// Print an unimplemented message and halt the CPU indefinitely.
 ///
 /// - `msg`: Message to print.
@@ -116,3 +147,4 @@ test {
 
 const std = @import("std");
 const options = @import("options");
+const Console = @import("Console.zig");

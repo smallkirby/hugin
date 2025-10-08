@@ -74,6 +74,16 @@ const Func = union(enum(u64)) {
         /// Argument to pass to the entry point.
         x3: u64,
     } = 0xC400_0003,
+
+    /// Shut down the system.
+    system_off: struct {
+        /// Not used.
+        x1: u64 = 0,
+        /// Not used.
+        x2: u64 = 0,
+        /// Not used.
+        x3: u64 = 0,
+    } = 0x8400_0008,
 };
 
 /// PSCI version.
@@ -99,6 +109,17 @@ pub fn awakePe(target: u64, entry: u64, arg: u64) Error!void {
     } });
 }
 
+/// Shutdown the system.
+pub fn shutdown() noreturn {
+    _ = psci(.{ .system_off = .{} }) catch {
+        @panic("Failed to shutdown the system via PSCI.");
+    };
+
+    hugin.endlessHalt();
+
+    unreachable;
+}
+
 /// Call a PSCI function.
 fn psci(func: Func) Error!u64 {
     const ret = switch (func) {
@@ -119,3 +140,4 @@ fn psci(func: Func) Error!u64 {
 
 const std = @import("std");
 const am = @import("asm.zig");
+const hugin = @import("hugin");

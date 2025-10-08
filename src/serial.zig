@@ -48,8 +48,14 @@ pub fn writeString(s: []const u8) void {
 /// IRQ handler for serial device.
 fn handler(_: *hugin.arch.Context) bool {
     if (serial.getc()) |c| {
-        const current = hugin.vm.current();
-        current.uart.putc(c, current.gicdist);
+        // Handle input if a console is active.
+        if (hugin.put2console(c)) {
+            return true;
+        } else {
+            // If console is not active, inject it to the VM's UART.
+            const current = hugin.vm.current();
+            current.uart.putc(c, current.gicdist);
+        }
     }
 
     return true;
