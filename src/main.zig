@@ -147,6 +147,15 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
         break :blk fat32;
     };
 
+    // Launch other PEs.
+    {
+        const psci_version = try hugin.arch.psci.getVersion();
+        log.info("PSCI version: {d}.{d}", .{ psci_version.major, psci_version.minor });
+
+        log.info("Launching other PEs...", .{});
+        try launchAllAps(dtb);
+    }
+
     // Init VM.
     {
         try hugin.vm.init(fat);
@@ -263,6 +272,7 @@ fn setupVirtioBlk(dtb: hugin.dtb.Dtb) !?hugin.drivers.VirtioBlk {
     }
 }
 
+/// Get available memory region from DTB.
 fn getAvailMemory(dtb: hugin.dtb.Dtb) !hugin.mem.PhysRegion {
     const memory_node = try dtb.searchNode(
         .{ .name = "memory" },
@@ -278,6 +288,68 @@ fn getAvailMemory(dtb: hugin.dtb.Dtb) !hugin.mem.PhysRegion {
         .addr = memory_reg.addr,
         .size = memory_reg.size,
     };
+}
+
+/// Launch all other PEs.
+fn launchAllAps(dtb: hugin.dtb.Dtb) !void {
+    const current_affinity = hugin.arch.am.mrs(.mpidr_el1).packedAffinity();
+
+    var node: ?hugin.dtb.Node = null;
+    while (true) {
+        node = try dtb.searchNode(
+            .{ .name = "cpu" },
+            node,
+        ) orelse break;
+        const reg = try dtb.readRegProp(
+            node.?,
+            0,
+        ) orelse break;
+
+        // Skip the current PE.
+        const affinity = reg.addr;
+        if (affinity == current_affinity) {
+            continue;
+        }
+
+        try launchAp(affinity);
+    }
+}
+
+/// Launch an AP with given affinity.
+fn launchAp(affinity: u64) !void {
+    // Allocate stack for the PE.
+    const pages = try hugin.mem.page_allocator.allocPages(
+        stack_size / hugin.mem.page_size,
+    );
+    errdefer hugin.mem.page_allocator.freePages(pages);
+    const stack_bottom = @intFromPtr(pages.ptr) + pages.len;
+
+    // Launch the PE.
+    try hugin.arch.psci.awakePe(
+        affinity,
+        @intFromPtr(&apEntry),
+        stack_bottom,
+    );
+}
+
+/// Entry point for APs.
+fn apEntry() callconv(.naked) noreturn {
+    asm volatile (
+        \\mov sp, x0
+        \\b %[entry]
+        :
+        : [entry] "i" (@intFromPtr(&apMain)),
+    );
+}
+
+/// Main function for APs.
+fn apMain() callconv(.c) noreturn {
+    log.info(
+        "Hello from AP#{X}",
+        .{hugin.arch.am.mrs(.mpidr_el1).packedAffinity()},
+    );
+
+    hugin.endlessHalt();
 }
 
 // =============================================================

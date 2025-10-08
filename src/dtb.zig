@@ -53,6 +53,8 @@ pub const Dtb = struct {
         while (!parser.isEmpty()) {
             if (try parser.search(option)) |found| {
                 return found;
+            } else {
+                return null;
             }
         } else return null;
     }
@@ -166,6 +168,12 @@ const Parser = struct {
     /// When a matching node is found, the parser state is undefined.
     pub fn search(self: *Parser, option: SearchOption) DtbError!?Node {
         try self.consumeNop();
+
+        if (Token.eql(.end_node, try self.peekChunk())) {
+            _ = try self.consumeChunk();
+            return null;
+        }
+
         if (!Token.eql(.begin_node, try self.consumeChunk())) {
             return error.UnexpectedToken;
         }

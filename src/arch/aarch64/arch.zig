@@ -2,6 +2,7 @@ pub const Error = paging.PagingError;
 
 pub const am = @import("asm.zig"); // TODO: should not be exported.
 pub const gicv3 = @import("gicv3.zig"); // TODO: should not be exported.
+pub const psci = @import("psci.zig"); // TODO:: should not be exported.
 pub const regs = @import("registers.zig"); // TODO: should not be exported.
 
 /// Register context.
