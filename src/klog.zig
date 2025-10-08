@@ -20,6 +20,8 @@ var writer = std.Io.Writer{
     .buffer = &.{},
 };
 
+var lock: SpinLock = .{};
+
 /// Write data to the serial console.
 fn drain(_: *std.Io.Writer, data: []const []const u8, _: usize) !usize {
     var written: usize = 0;
@@ -61,6 +63,9 @@ pub fn log(
         );
     };
 
+    const ie = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(ie);
+
     writer.print(
         level_str ++ " " ++ scope_str ++ fmt ++ "\n",
         args,
@@ -76,3 +81,4 @@ const io = std.io;
 const options = @import("options");
 const hugin = @import("hugin");
 const serial = hugin.serial;
+const SpinLock = hugin.SpinLock;

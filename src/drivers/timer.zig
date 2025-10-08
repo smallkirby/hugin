@@ -15,6 +15,9 @@ var pintid_offset: intr.IntrId = undefined;
 /// "virtual" here means "to a guest OS".
 const vintid = 27;
 
+/// Global lock.
+var lock: SpinLock = .{};
+
 /// Initialize the timer globally.
 pub fn initGlobal(dtb: hugin.dtb.Dtb) Error!void {
     const node = try dtb.searchNode(
@@ -23,6 +26,9 @@ pub fn initGlobal(dtb: hugin.dtb.Dtb) Error!void {
     ) orelse return Error.NotFound;
     const prop = try dtb.getProp(node, "interrupts") orelse return Error.NotFound;
     const ints = prop.slice();
+
+    const ie = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(ie);
 
     if (bits.fromBigEndian(ints[6]) == dtb_gic_ppi) {
         pintid_offset = @intCast(bits.fromBigEndian(ints[7]));
@@ -42,6 +48,9 @@ pub fn initLocal() Error!void {
 
 /// Timer interrupt handler
 fn timerHandler(_: *arch.regs.Context) bool {
+    const ie = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(ie);
+
     hugin.vm.current().gicredist.inject(
         vintid,
         pintid_offset + intr.ppi_base,
@@ -60,3 +69,4 @@ const hugin = @import("hugin");
 const arch = hugin.arch;
 const bits = hugin.bits;
 const intr = hugin.intr;
+const SpinLock = hugin.SpinLock;

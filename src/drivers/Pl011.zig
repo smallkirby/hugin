@@ -6,6 +6,8 @@ const Self = @This();
 
 /// Base address of the UART registers.
 base: usize,
+/// Lock for PL011 access.
+lock: SpinLock = .{},
 
 const map = struct {
     /// Data Register.
@@ -125,7 +127,10 @@ pub fn new(base: usize) Self {
 }
 
 /// Enable receive interrupt.
-pub fn enableIntr(self: Self) void {
+pub fn enableIntr(self: *Self) void {
+    const ie = self.lock.lockDisableIrq();
+    defer self.lock.unlockRestoreIrq(ie);
+
     self.write(map.cr, std.mem.zeroInit(Control, .{
         .uarten = true,
         .txe = true,
@@ -149,7 +154,10 @@ fn isRxEmpty(self: Self) bool {
 /// Send a character.
 ///
 /// This function blocks until the character is sent.
-pub fn putc(self: Self, c: u8) void {
+pub fn putc(self: *Self, c: u8) void {
+    const ie = self.lock.lockDisableIrq();
+    defer self.lock.unlockRestoreIrq(ie);
+
     while (self.isTxFull()) {
         atomic.spinLoopHint();
     }
@@ -159,7 +167,10 @@ pub fn putc(self: Self, c: u8) void {
 /// Get a character.
 ///
 /// This function returns null if the receive FIFO is empty.
-pub fn getc(self: Self) ?u8 {
+pub fn getc(self: *Self) ?u8 {
+    const ie = self.lock.lockDisableIrq();
+    defer self.lock.unlockRestoreIrq(ie);
+
     return if (self.isRxEmpty()) null else self.read(map.dr, u8);
 }
 
@@ -187,3 +198,5 @@ fn write(self: Self, offset: usize, value: anytype) void {
 
 const std = @import("std");
 const atomic = std.atomic;
+const hugin = @import("hugin");
+const SpinLock = hugin.SpinLock;

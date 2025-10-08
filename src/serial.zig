@@ -1,5 +1,6 @@
 var serial: Pl011 = undefined;
 var initialized: bool = false;
+var lock: SpinLock = .{};
 
 /// Initialize the default serial console.
 pub fn init(pl011: Pl011) void {
@@ -11,6 +12,9 @@ pub fn init(pl011: Pl011) void {
 pub fn enableIntr(id: hugin.intr.IntrId) hugin.intr.IntrError!void {
     hugin.rtt.expect(initialized);
 
+    const ie = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(ie);
+
     // Enable GIC interrupt for PL011.
     try hugin.intr.enable(id, .spi, &handler);
 
@@ -20,6 +24,9 @@ pub fn enableIntr(id: hugin.intr.IntrId) hugin.intr.IntrError!void {
 
 /// Check if the default serial console is initialized.
 pub fn isInitialized() bool {
+    const ie = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(ie);
+
     return initialized;
 }
 
@@ -30,6 +37,9 @@ pub fn write(c: u8) void {
 
 /// Write a string to the default serial console.
 pub fn writeString(s: []const u8) void {
+    const ie = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(ie);
+
     for (s) |c| {
         write(c);
     }
@@ -53,3 +63,4 @@ const std = @import("std");
 
 const hugin = @import("hugin");
 const Pl011 = hugin.drivers.Pl011;
+const SpinLock = hugin.SpinLock;

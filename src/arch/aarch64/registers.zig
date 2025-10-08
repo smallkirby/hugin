@@ -4,6 +4,7 @@ pub const SystemReg = enum {
     elr_el1,
     elr_el2,
     elr_el3,
+    daif,
     spsr_el1,
     spsr_el2,
     spsr_el3,
@@ -76,6 +77,7 @@ pub const SystemReg = enum {
         return switch (self) {
             .currentel => CurrentEl,
             .elr_el1, .elr_el2, .elr_el3 => Elr,
+            .daif => Daif,
             .spsr_el1, .spsr_el2, .spsr_el3 => Spsr,
             .hcr_el2 => HcrEl2,
             .cnthctl_el2 => Cnthctl,
@@ -227,6 +229,24 @@ pub const Spsr = packed struct(u64) {
 pub const Elr = packed struct(u64) {
     /// Return address.
     addr: u64,
+};
+
+/// DAIF.
+///
+/// Interrupt Mask Bits.
+pub const Daif = packed struct(u64) {
+    /// Reserved.
+    _reserved0: u6 = 0,
+    /// FIQ mask bit.
+    f: bool,
+    /// IRQ mask bit.
+    i: bool,
+    /// SError exception mask bit.
+    a: bool,
+    /// Watchpoint, Breakpoint, and Software Step exceptions mask bit.
+    d: bool,
+    /// Reserved.
+    _reserved1: u54 = 0,
 };
 
 /// HCR_EL2.

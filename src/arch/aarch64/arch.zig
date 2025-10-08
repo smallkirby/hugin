@@ -28,6 +28,25 @@ pub fn initInterrupts(dist_base: PhysRegion, redist_base: PhysRegion) struct { g
     return .{ dist, redist };
 }
 
+/// Disable all interrupts.
+pub fn disableAllInterrupts() u64 {
+    const daif = am.mrs(.daif);
+    am.msr(.daif, .{
+        .d = daif.d,
+        .a = daif.a,
+        .i = true,
+        .f = true,
+    });
+    asm volatile ("isb");
+
+    return @bitCast(daif);
+}
+
+/// Set DAIF register.
+pub fn setInterrupts(daif: u64) void {
+    am.msr(.daif, @bitCast(daif));
+}
+
 /// Configure GIC distributor to enable an interrupt.
 pub fn enableDistIntr(id: hugin.intr.IntrId, dist: gicv3.Distributor) void {
     dist.setGroup(id, .ns_grp1);

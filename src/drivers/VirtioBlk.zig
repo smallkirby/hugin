@@ -44,6 +44,8 @@ qavail: *virtio.QueueAvail,
 qused: *virtio.QueueUsed,
 /// Bitmap to manage available descriptors.
 bitmap: hugin.bitmap.Bitmap(virtio.num_descs),
+/// Lock.
+lock: SpinLock = .{},
 
 /// Create a new Virtio Block Device driver instance.
 pub fn new(base: usize, allocator: Allocator, pallocator: PageAllocator) Error!Self {
@@ -144,6 +146,9 @@ fn operate(self: *Self, buffer: []u8, addr: u64, op: Operation) Error!void {
     if (buffer.len & block_mask != 0) {
         return Error.InvalidAddress;
     }
+
+    const ie = self.lock.lockDisableIrq();
+    defer self.lock.unlockRestoreIrq(ie);
 
     // Setup status.
     var status: u8 = 0xFF;
@@ -255,5 +260,6 @@ const std = @import("std");
 const hugin = @import("hugin");
 const Allocator = std.mem.Allocator;
 const PageAllocator = hugin.mem.PageAllocator;
+const SpinLock = hugin.SpinLock;
 
 const virtio = @import("virtio.zig");

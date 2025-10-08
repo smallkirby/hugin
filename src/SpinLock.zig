@@ -4,10 +4,13 @@ const SpinLock = Self;
 const State = atomic.Value(bool);
 
 /// State of the spin lock.
+///
 /// true when locked, false when unlocked.
 _state: State = State.init(false),
 
-/// Lock the spin lock.
+/// Lock the spin lock and disable all interrupts.
+///
+/// Must be paired with `unlock()`.
 pub fn lock(self: *Self) void {
     while (self._state.cmpxchgWeak(
         false,
@@ -19,11 +22,18 @@ pub fn lock(self: *Self) void {
     }
 }
 
-/// Lock the spin lock and disable IRQ.
+/// Lock the spin lock and disable all interrupts.
 ///
 /// Must be paired with `unlockRestoreIrq()`.
-pub fn lockDisableIrq(_: *SpinLock) bool {
-    hugin.unimplemented("lockDisableIrq()");
+pub fn lockDisableIrq(self: *SpinLock) u64 {
+    if (!is_test) {
+        const ie = arch.disableAllInterrupts();
+        lock(self);
+        return ie;
+    } else {
+        lock(self);
+        return false;
+    }
 }
 
 /// Unlock the spin lock.
@@ -32,8 +42,11 @@ pub fn unlock(self: *Self) void {
 }
 
 /// Unlock the spin lock and restore IRQ mask.
-pub fn unlockRestoreIrq(_: *SpinLock, _: bool) void {
-    hugin.unimplemented("unlockRestoreIrq()");
+pub fn unlockRestoreIrq(self: *SpinLock, ie: u64) void {
+    self.unlock();
+    if (!is_test) {
+        arch.setInterrupts(ie);
+    }
 }
 
 /// Check if the spin lock is locked.
@@ -46,6 +59,7 @@ pub fn isLocked(self: *Self) bool {
 // =============================================================
 
 const atomic = @import("std").atomic;
+const is_test = @import("builtin").is_test;
 
 const hugin = @import("hugin");
 const arch = hugin.arch;

@@ -547,3 +547,4 @@ const regs = @import("registers.zig");
 const IntrId = hugin.intr.IntrId;
 const Priority = hugin.intr.Priority;
 const PhysRegion = hugin.mem.PhysRegion;
+const SpinLock = hugin.SpinLock;
