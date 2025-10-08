@@ -63,6 +63,6 @@
 
   chosen {
     stdout-path = "/pl011@09000000";
-    bootargs = "earlycon=pl011,0x09000000 console=ttyAMA0 root=/dev/vda";
+    bootargs = "earlycon=pl011,0x09000000 console=ttyAMA0 root=/dev/vda init=/bin/sh";
   };
 };
