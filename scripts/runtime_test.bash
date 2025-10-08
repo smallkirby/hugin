@@ -26,6 +26,8 @@ HEYSTACK=(
   "Built 1 zonelists, mobility grouping on."
   # Timer interrupt works.
   "clocksource: jiffies:"
+  # Init process starts.
+  "as init process"
 )
 
 USE_SUDO=0
