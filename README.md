@@ -6,6 +6,8 @@
 ![Unit Tests](https://github.com/smallkirby/hugin/actions/workflows/unittest.yml/badge.svg)
 ![Runtime Tests](https://github.com/smallkirby/hugin/actions/workflows/rtt.yml/badge.svg)
 
+[Hugin](https://github.com/user-attachments/assets/26c42d67-f77a-4e34-8499-6521ec77d249)
+
 ## Development
 
 ```bash
