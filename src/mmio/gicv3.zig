@@ -1,5 +1,12 @@
 const Error = mmio.MmioError;
 
+pub const InjectList = struct {
+    /// List node.
+    node: std.DoublyLinkedList.Node = .{},
+    /// Virtual interrupts to inject.
+    entry: hugin.vgic.InjectEntry,
+};
+
 /// GICv3 Distributor virtual MMIO device.
 pub const DistributorDevice = struct {
     const Self = @This();
@@ -7,6 +14,13 @@ pub const DistributorDevice = struct {
 
     /// MMIO device interface.
     interface: hugin.vm.MmioDevice,
+
+    /// Memory allocator.
+    allocator: Allocator,
+    /// Virtual interrupts waiting to be injected to the vGIC.
+    pending_injects: std.DoublyLinkedList = .{},
+    /// Global lock.
+    lock: SpinLock = .{},
 
     // Virtual registers.
     ctlr: Ctlr,
@@ -28,6 +42,7 @@ pub const DistributorDevice = struct {
         const self = try allocator.create(Self);
         self.* = std.mem.zeroInit(Self, .{
             .interface = initInterface(self, base, len),
+            .allocator = allocator,
         });
 
         return self;
@@ -230,17 +245,34 @@ pub const DistributorDevice = struct {
         const grp = self.getGroup(intid);
         const prio = self.getPriority(intid);
         const router = self.irouter[intid];
+        const entry = hugin.vgic.createIntr(
+            intid,
+            grp,
+            prio,
+            pintid,
+        );
 
         if (router2affinity(router) == arch.am.mrs(.mpidr_el1).packedAffinity()) {
             // Injection to the same PE.
-            hugin.vgic.pushVintr(
-                intid,
-                grp,
-                prio,
-                pintid,
-            );
+            hugin.vgic.pushVintr(entry);
         } else {
-            hugin.unimplemented("DistributorDevice.inject to other PE");
+            // Add to pending inject list.
+            const pending_node = self.allocator.create(InjectList) catch {
+                log.err("Failed to allocate memory for pending inject list.", .{});
+                return;
+            };
+            pending_node.* = .{ .entry = entry };
+
+            const ie = self.lock.lockDisableIrq();
+            self.pending_injects.append(&pending_node.node);
+            self.lock.unlockRestoreIrq(ie);
+
+            // Notify the target PE.
+            const iccsgi1r = arch.regs.IccSgi1r.from(
+                router2affinity(router),
+                hugin.vgic.sgi_offset,
+            );
+            arch.am.msr(.icc_sgi1r_el1, iccsgi1r);
         }
     }
 
@@ -499,6 +531,13 @@ pub const RedistributorDevice = struct {
     /// MMIO device interface.
     interface: hugin.vm.MmioDevice,
 
+    /// Memory allocator.
+    allocator: Allocator,
+    /// Virtual interrupts waiting to be injected to the vGIC.
+    pending_injects: std.DoublyLinkedList = .{},
+    /// Global lock.
+    lock: SpinLock = .{},
+
     // Virtual registers.
     affinity: u32,
     ctlr: Ctlr,
@@ -521,6 +560,7 @@ pub const RedistributorDevice = struct {
             .waker = .{ .ca = true },
             .affinity = arch.am.mrs(.mpidr_el1).packedAffinity(),
             .interface = initInterface(self, base, len),
+            .allocator = allocator,
         });
 
         return self;
@@ -682,14 +722,29 @@ pub const RedistributorDevice = struct {
 
         if (self.affinity == arch.am.mrs(.mpidr_el1).packedAffinity()) {
             // Injection to the same PE.
-            hugin.vgic.pushVintr(
+            const entry = hugin.vgic.createIntr(
                 intid,
                 group.number(),
                 prio,
                 pintid,
             );
+            hugin.vgic.pushVintr(entry);
         } else {
-            hugin.unimplemented("RedistributorDevice.inject to other PE");
+            // Add to pending inject list.
+            const pending_node = self.allocator.create(InjectList) catch {
+                log.err("Failed to allocate memory for pending inject list.", .{});
+                return;
+            };
+            const ie = self.lock.lockDisableIrq();
+            self.pending_injects.append(&pending_node.node);
+            self.lock.unlockRestoreIrq(ie);
+
+            // Notify the target PE.
+            const iccsgi1r = arch.regs.IccSgi1r.from(
+                self.affinity,
+                hugin.vgic.sgi_offset,
+            );
+            arch.am.msr(.icc_sgi1r_el1, iccsgi1r);
         }
     }
 
@@ -890,3 +945,4 @@ const mmio = hugin.mmio;
 
 const Allocator = std.mem.Allocator;
 const Priority = intr.Priority;
+const SpinLock = hugin.SpinLock;

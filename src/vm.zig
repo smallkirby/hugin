@@ -11,6 +11,10 @@ pub const Error = error{
 var vms: SinglyLinkedList = .{};
 /// Next VM ID.
 var next_vmid: u32 = 0;
+/// Global lock.
+var lock: SpinLock = .{};
+/// Currently active VM.
+var active_vm: *Vm = undefined;
 
 /// Virtual machine instance.
 pub const Vm = struct {
@@ -215,7 +219,20 @@ pub fn init(fat: hugin.Fat32) Error!void {
         .gicredist = undefined,
         .uart = undefined,
     };
-    vms.prepend(&vm._node);
+
+    // Register Thread ID.
+    {
+        arch.am.msr(.tpidr_el2, .{ .tid = vmid });
+    }
+
+    // Put the VM instance to the list.
+    {
+        const ie = lock.lockDisableIrq();
+        defer lock.unlockRestoreIrq(ie);
+        vms.prepend(&vm._node);
+
+        active_vm = vm;
+    }
 
     // Load a guest kernel image and DTB.
     {
@@ -299,9 +316,50 @@ pub fn init(fat: hugin.Fat32) Error!void {
     }
 }
 
+/// Switch the current VM.
+pub fn switchCurrent(vmid: u32) Error!void {
+    const ie = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(ie);
+
+    if (active_vm.vmid == vmid) {
+        return;
+    }
+
+    var iter = vms.first;
+    while (iter) |node| : (iter = node.next) {
+        const vm: *Vm = @fieldParentPtr("_node", node);
+        if (vm.vmid == vmid) {
+            active_vm = vm;
+            return;
+        }
+    } else {
+        return Error.NotFound;
+    }
+}
+
 /// Get the current VM instance.
 pub fn current() *Vm {
-    return @fieldParentPtr("_node", vms.first.?);
+    const ie = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(ie);
+
+    return active_vm;
+}
+
+/// Get the VM instance running on the current PE.
+///
+/// Note that the returned VM instance may not be the one currently running
+pub fn local() *Vm {
+    const ie = lock.lockDisableIrq();
+    defer lock.unlockRestoreIrq(ie);
+
+    const vmid = arch.am.mrs(.tpidr_el2).tid;
+    var iter = vms.first;
+    while (iter) |node| : (iter = node.next) {
+        const vm: *Vm = @fieldParentPtr("_node", node);
+        if (vm.vmid == vmid) {
+            return vm;
+        }
+    } else @panic("No VM found for the current PE.");
 }
 
 /// Kernel header of Aarch64 Linux kernel.
@@ -353,5 +411,6 @@ const palloc = hugin.mem.page_allocator;
 
 const MmioError = mmio.MmioError;
 const SinglyLinkedList = std.SinglyLinkedList;
+const SpinLock = hugin.SpinLock;
 const Virt = hugin.mem.Virt;
 const Phys = hugin.mem.Phys;

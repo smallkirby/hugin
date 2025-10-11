@@ -10,6 +10,11 @@ pub const panic = @import("panic.zig").panic_fn;
 /// Size of kernel stack in bytes.
 const stack_size = 16 * hugin.mem.size_4kib;
 
+/// Devitcetree blob.
+var dtb: hugin.dtb.Dtb = undefined;
+/// FAT32 filesystem instance.
+var fat: hugin.Fat32 = undefined;
+
 /// Kernel entry point.
 export fn main(argc: usize, argv: [*]const [*:0]const u8) callconv(.c) usize {
     const sp = hugin.arch.getSp();
@@ -30,7 +35,7 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
     const arg0 = argv[0];
     const dtb_addr_str = arg0[0..std.mem.len(arg0)];
     const dtb_addr = try std.fmt.parseInt(usize, dtb_addr_str, 0);
-    const dtb = try hugin.dtb.Dtb.new(dtb_addr);
+    dtb = try hugin.dtb.Dtb.new(dtb_addr);
 
     // Initialize UART.
     {
@@ -61,31 +66,24 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
         hugin.rtt.expectEqual(2, hugin.arch.getCurrentEl());
     }
 
+    // Copy BSP's context.
+    {
+        hugin.arch.saveBspContext();
+    }
+
     // Setup memory.
     {
         const arg1 = argv[1];
         const elf_addr_str = arg1[0..std.mem.len(arg1)];
         const elf_addr = try std.fmt.parseInt(usize, elf_addr_str, 0);
-        try setupMemory(dtb, elf_addr, sp);
+        try setupMemory(elf_addr, sp);
     }
 
     // Setup interrupts.
     log.info("Setting up interrupts...", .{});
     {
-        const gic_node = try dtb.searchNode(
-            .{ .compat = "arm,gic-v3" },
-            null,
-        ) orelse {
-            return error.SearchGicNode;
-        };
-        const dist_reg = try dtb.readRegProp(gic_node, 0) orelse {
-            return error.NoRegProperty;
-        };
-        const redist_reg = try dtb.readRegProp(gic_node, 1) orelse {
-            return error.NoRegProperty;
-        };
-
-        hugin.intr.init(dist_reg, redist_reg);
+        try hugin.intr.initGlobal(dtb);
+        try hugin.intr.initLocal(dtb);
     }
 
     // Enable PL011 interrupt.
@@ -121,8 +119,8 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
 
     // Setup virtio-blk device.
     log.info("Setting up virtio-blk device...", .{});
-    const fat = blk: {
-        var vblk = try setupVirtioBlk(dtb) orelse {
+    fat = blk: {
+        var vblk = try setupVirtioBlk() orelse {
             log.warn("No virtio-blk device found.", .{});
             return error.NoVirtioBlkDevice;
         };
@@ -147,13 +145,15 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
         break :blk fat32;
     };
 
-    // Launch other PEs.
+    // Check PSCI version.
     {
         const psci_version = try hugin.arch.psci.getVersion();
         log.info("PSCI version: {d}.{d}", .{ psci_version.major, psci_version.minor });
+    }
 
-        log.info("Launching other PEs...", .{});
-        try launchAllAps(dtb);
+    // Initialize console.
+    {
+        hugin.initConsole(dtb, fat);
     }
 
     // Init VM.
@@ -169,14 +169,14 @@ fn kernelMain(argc: usize, argv: [*]const [*:0]const u8, sp: usize) !void {
     }
 }
 
-fn setupMemory(dtb: hugin.dtb.Dtb, elf: usize, sp: usize) !void {
+fn setupMemory(elf: usize, sp: usize) !void {
     const max_num_reserveds = 16;
     var reserveds: [max_num_reserveds]hugin.mem.PhysRegion = undefined;
     var num_reserveds: usize = 0;
 
     // Get available memory region from DTB.
     const avail: hugin.mem.PhysRegion = blk: {
-        const region = try getAvailMemory(dtb);
+        const region = try getAvailMemory();
         log.info("Memory @ 0x{X:0>16} - 0x{X:0>16}", .{
             region.addr,
             region.addr + region.size,
@@ -250,7 +250,7 @@ fn setupMemory(dtb: hugin.dtb.Dtb, elf: usize, sp: usize) !void {
 }
 
 /// Find and setup Virtio block device.
-fn setupVirtioBlk(dtb: hugin.dtb.Dtb) !?hugin.drivers.VirtioBlk {
+fn setupVirtioBlk() !?hugin.drivers.VirtioBlk {
     var cur: ?hugin.dtb.Node = null;
     while (true) {
         cur = try dtb.searchNode(
@@ -273,7 +273,7 @@ fn setupVirtioBlk(dtb: hugin.dtb.Dtb) !?hugin.drivers.VirtioBlk {
 }
 
 /// Get available memory region from DTB.
-fn getAvailMemory(dtb: hugin.dtb.Dtb) !hugin.mem.PhysRegion {
+fn getAvailMemory() !hugin.mem.PhysRegion {
     const memory_node = try dtb.searchNode(
         .{ .name = "memory" },
         null,
@@ -288,68 +288,6 @@ fn getAvailMemory(dtb: hugin.dtb.Dtb) !hugin.mem.PhysRegion {
         .addr = memory_reg.addr,
         .size = memory_reg.size,
     };
-}
-
-/// Launch all other PEs.
-fn launchAllAps(dtb: hugin.dtb.Dtb) !void {
-    const current_affinity = hugin.arch.am.mrs(.mpidr_el1).packedAffinity();
-
-    var node: ?hugin.dtb.Node = null;
-    while (true) {
-        node = try dtb.searchNode(
-            .{ .name = "cpu" },
-            node,
-        ) orelse break;
-        const reg = try dtb.readRegProp(
-            node.?,
-            0,
-        ) orelse break;
-
-        // Skip the current PE.
-        const affinity = reg.addr;
-        if (affinity == current_affinity) {
-            continue;
-        }
-
-        try launchAp(affinity);
-    }
-}
-
-/// Launch an AP with given affinity.
-fn launchAp(affinity: u64) !void {
-    // Allocate stack for the PE.
-    const pages = try hugin.mem.page_allocator.allocPages(
-        stack_size / hugin.mem.page_size,
-    );
-    errdefer hugin.mem.page_allocator.freePages(pages);
-    const stack_bottom = @intFromPtr(pages.ptr) + pages.len;
-
-    // Launch the PE.
-    try hugin.arch.psci.awakePe(
-        affinity,
-        @intFromPtr(&apEntry),
-        stack_bottom,
-    );
-}
-
-/// Entry point for APs.
-fn apEntry() callconv(.naked) noreturn {
-    asm volatile (
-        \\mov sp, x0
-        \\b %[entry]
-        :
-        : [entry] "i" (@intFromPtr(&apMain)),
-    );
-}
-
-/// Main function for APs.
-fn apMain() callconv(.c) noreturn {
-    log.info(
-        "Hello from AP#{X}",
-        .{hugin.arch.am.mrs(.mpidr_el1).packedAffinity()},
-    );
-
-    hugin.endlessHalt();
 }
 
 // =============================================================

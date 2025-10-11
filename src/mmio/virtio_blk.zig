@@ -154,7 +154,7 @@ pub const VioblkDevice = struct {
             .queue_pfn => {
                 const pfn: usize = value.word;
                 const ipa = pfn * self.page_size;
-                const phys = hugin.vm.current().ipa2pa(ipa);
+                const phys = hugin.vm.local().ipa2pa(ipa);
 
                 const desc_table_size = self.queue_size * @sizeOf(virtio.QueueDesc);
                 self.desc = @ptrFromInt(phys);
@@ -219,7 +219,7 @@ pub const VioblkDevice = struct {
                 return;
             }
 
-            const reqaddr = hugin.vm.current().ipa2pa(desc.addr);
+            const reqaddr = hugin.vm.local().ipa2pa(desc.addr);
             const req: *Vblk.Request = @ptrFromInt(reqaddr);
             if (req.type != .in and req.type != .out) {
                 log.err("Unsupported request type: {t}", .{req.type});
@@ -235,7 +235,7 @@ pub const VioblkDevice = struct {
             const status_desc = while (desc.flags.next) : (desc = &self.desc[desc.next]) {
                 total += desc.len;
 
-                const buf: [*]u8 = @ptrFromInt(hugin.vm.current().ipa2pa(desc.addr));
+                const buf: [*]u8 = @ptrFromInt(hugin.vm.local().ipa2pa(desc.addr));
                 if (req.type == .out) {
                     offset += self.fat.write(self.fs, buf[0..desc.len], offset, palloc) catch err: {
                         log.err("Failed to write to FAT32 filesystem.", .{});
@@ -252,7 +252,7 @@ pub const VioblkDevice = struct {
             } else desc;
 
             // Write status.
-            const status_buf: *volatile u8 = @ptrFromInt(hugin.vm.current().ipa2pa(status_desc.addr));
+            const status_buf: *volatile u8 = @ptrFromInt(hugin.vm.local().ipa2pa(status_desc.addr));
             status_buf.* = ret;
             total += status_desc.len;
 
@@ -262,7 +262,7 @@ pub const VioblkDevice = struct {
 
         // Inject an interrupt.
         self.interrupt_status = 1;
-        hugin.vm.current().injectInterrupt(intid_virtio_blk, null);
+        hugin.vm.local().injectInterrupt(intid_virtio_blk, null);
     }
 
     /// Get the next available index in the Available Ring.

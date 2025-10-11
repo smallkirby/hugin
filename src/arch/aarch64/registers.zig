@@ -1,9 +1,21 @@
 /// System registers.
 pub const SystemReg = enum {
     currentel,
+    tpidr_el0,
+    tpidr_el1,
+    tpidr_el2,
+    tpidr_el3,
+    tcr_el1,
+    tcr_el2,
+    tcr_el3,
     elr_el1,
     elr_el2,
     elr_el3,
+    ttbr0_el2,
+    ttbr1_el2,
+    mair_el1,
+    mair_el2,
+    mair_el3,
     daif,
     spsr_el1,
     spsr_el2,
@@ -47,6 +59,7 @@ pub const SystemReg = enum {
     icc_iar1_el1,
     icc_dir_el1,
     icc_eoir1_el1,
+    icc_sgi1r_el1,
     ich_lr0_el2,
     ich_lr1_el2,
     ich_lr2_el2,
@@ -76,7 +89,12 @@ pub const SystemReg = enum {
     pub fn Type(comptime self: SystemReg) type {
         return switch (self) {
             .currentel => CurrentEl,
+            .tpidr_el0, .tpidr_el1, .tpidr_el2, .tpidr_el3 => Tpidr,
             .elr_el1, .elr_el2, .elr_el3 => Elr,
+            .ttbr0_el2 => Ttbr0,
+            .ttbr1_el2 => Ttbr1,
+            .mair_el1, .mair_el2, .mair_el3 => Mair,
+            .tcr_el1, .tcr_el2, .tcr_el3 => Tcr,
             .daif => Daif,
             .spsr_el1, .spsr_el2, .spsr_el3 => Spsr,
             .hcr_el2 => HcrEl2,
@@ -86,7 +104,7 @@ pub const SystemReg = enum {
             .vttbr_el2 => VttbrEl2,
             .vbar_el1, .vbar_el2, .vbar_el3 => Vbar,
             .esr_el1, .esr_el2, .esr_el3 => Esr,
-            .sctlr_el1, .sctlr_el2, .sctlr_el3 => Sctrr,
+            .sctlr_el1, .sctlr_el2, .sctlr_el3 => Sctlr,
             .far_el1, .far_el2, .far_el3 => Far,
             .hpfar_el2 => Hpfar,
             .sp_el0, .sp_el1, .sp_el2, .sp_el3 => Sp,
@@ -103,6 +121,7 @@ pub const SystemReg = enum {
             .icc_iar1_el1 => IccIar1El1,
             .icc_dir_el1 => IccDirEl1,
             .icc_eoir1_el1 => IccEoir1El1,
+            .icc_sgi1r_el1 => IccSgi1r,
             .ich_lr0_el2, .ich_lr1_el2, .ich_lr2_el2, .ich_lr3_el2, .ich_lr4_el2, .ich_lr5_el2, .ich_lr6_el2, .ich_lr7_el2, .ich_lr8_el2, .ich_lr9_el2, .ich_lr10_el2, .ich_lr11_el2, .ich_lr12_el2, .ich_lr13_el2, .ich_lr14_el2, .ich_lr15_el2 => IchLr,
             .ich_vtr_el2 => IchVtr,
             .ich_eisr_el2 => IchEisr,
@@ -157,6 +176,13 @@ pub const CurrentEl = packed struct(u64) {
     el: u2,
     /// Reserved.
     _reserved1: u60 = 0,
+};
+
+/// TPIDR_ELx.
+///
+/// Software Thread ID Register.
+pub const Tpidr = packed struct(u64) {
+    tid: u64,
 };
 
 /// SPSR_ELx.
@@ -229,6 +255,164 @@ pub const Spsr = packed struct(u64) {
 pub const Elr = packed struct(u64) {
     /// Return address.
     addr: u64,
+};
+
+/// TTBR0_EL2.
+pub const Ttbr0 = packed struct(u64) {
+    /// Common not Private.
+    cnp: bool,
+    /// Translation table base address.
+    baddr: u47,
+    /// ASIS for the translation table base address.
+    asid: u16,
+
+    pub fn from(base: u64) Ttbr0 {
+        return .{
+            .cnp = false,
+            .baddr = @intCast(base >> 1),
+            .asid = 0,
+        };
+    }
+
+    pub fn addr(self: Ttbr0) usize {
+        return @as(usize, self.baddr) << 1;
+    }
+};
+
+/// TTBR1_EL2.
+pub const Ttbr1 = packed struct(u64) {
+    /// Common not Private.
+    cnp: bool,
+    /// Translation table base address.
+    baddr: u47,
+    /// ASIS for the translation table base address.
+    asid: u16,
+
+    pub fn from(base: u64) Ttbr1 {
+        return .{
+            .cnp = false,
+            .baddr = @intCast(base >> 1),
+            .asid = 0,
+        };
+    }
+
+    pub fn addr(self: Ttbr1) usize {
+        return @as(usize, self.baddr) << 1;
+    }
+};
+
+/// MAIR_ELx.
+///
+/// Memory Attribute Indirection Register.
+pub const Mair = packed struct(u64) {
+    attr0: u8,
+    attr1: u8,
+    attr2: u8,
+    attr3: u8,
+    attr4: u8,
+    attr5: u8,
+    attr6: u8,
+    attr7: u8,
+};
+
+/// TCR_ELx.
+///
+/// Translation Control Register.
+pub const Tcr = packed struct(u64) {
+    /// The size offset parameter of the memory region addressed by VTTBR_EL2.
+    t0sz: u6,
+    /// Starting level of Stage 2 translation table walk.
+    sl0: u2,
+    /// Inner cacheability attribute for memory associated with translation table walks using VTTBR_EL2.
+    irgn0: Cacheability,
+    /// Outer cacheability attribute for memory associated with translation table walks using VTTBR_EL2.
+    orgn0: Cacheability,
+    /// Shareability attribute for memory associated with translation table walks using VTTBR_EL2.
+    sh0: Shareability,
+    /// Granule size for the VTTBR_EL2.
+    tg0: Tg0,
+    /// Physical address Size for the Stage 2 translation.
+    ps: u3,
+    ///
+    vs: u1,
+    /// Reserved.
+    _reserved0: u1 = 0,
+    ///
+    ha: u1,
+    ///
+    hd: u1,
+    /// Reserved.
+    _reserved1: u2 = 0,
+    ///
+    hwu59: u1,
+    ///
+    hwu60: u1,
+    ///
+    hwu61: u1,
+    ///
+    hwu62: u1,
+    ///
+    nsw: u1,
+    ///
+    nsa: u1,
+    /// Reserved.
+    _reserved2: u1 = 0,
+    ds: u1,
+    ///
+    sl2: u1,
+    ///
+    ao: u1,
+    ///
+    tlt: u1,
+    ///
+    s2pie: u1,
+    ///
+    s2poe: u1,
+    ///
+    d128: u1,
+    /// Reserved.
+    _reserved3: u1 = 0,
+    ///
+    gcsh: u1,
+    ///
+    tl0: u1,
+    /// Reserved.
+    _reserved: u2 = 0,
+    ///
+    haft: u1,
+    /// Reserved.
+    _reserved4: u19 = 0,
+
+    const Tg0 = enum(u2) {
+        /// 4KiB
+        size_4kib = 0b00,
+        /// 64KiB
+        size_64kib = 0b01,
+        /// 16KiB
+        size_16kib = 0b10,
+    };
+
+    const Cacheability = enum(u2) {
+        /// Normal memory, Non-cacheable.
+        nc = 0b00,
+        /// Normal memory, Write-Back Read-Allocate Write-Allocate Cacheable.
+        wbrawac = 0b01,
+        /// Normal memory, Write-Through Read-Allocate Write-Allocate Cacheable.
+        wtranwac = 0b10,
+        /// Normal memory, Write-Back Read-Allocate Write-Allocate Non-Cacheable.
+        wbranwac = 0b11,
+    };
+
+    const Shareability = enum(u2) {
+        /// Non-shareable.
+        non = 0b00,
+        /// Reserved.
+        _reserved = 0b01,
+        /// Outer Sharable.
+        outer = 0b10,
+        /// Inner Sharable.
+        inner = 0b11,
+    };
 };
 
 /// DAIF.
@@ -778,7 +962,7 @@ pub const Esr = packed struct(u64) {
 /// SCTLR_ELx.
 ///
 /// System Control Register.
-pub const Sctrr = packed struct(u64) {
+pub const Sctlr = packed struct(u64) {
     /// MMU enable for EL1&0 stage 1 address translation.
     m: bool,
     /// Alignment check enable.
@@ -1128,6 +1312,52 @@ pub const IccEoir1El1 = packed struct(u64) {
     intid: u24,
     /// Reserved.
     _reserved: u40 = 0,
+};
+
+/// ICC_SGI1R_EL1.
+///
+/// Interrupt Controller Software Generated Interrupt Group 1 Register.
+pub const IccSgi1r = packed struct(u64) {
+    /// Target List. Set of PEs for which SGI interrupts will be generated.
+    ///
+    /// Each bit corresponds to the PE within a cluster with an Affinity 0 value equal to the bit number.
+    target_list: u16,
+    /// Affinity level 1.
+    aff1: u8,
+    /// Interrupt ID.
+    intid: u4,
+    /// Reserved.
+    _reserved0: u4 = 0,
+    /// Affinity level 2.
+    aff2: u8,
+    /// Interrupt Routing Mode.
+    irm: Irm,
+    /// Reserved.
+    _reserved1: u3 = 0,
+    /// Range selector.
+    rs: u4 = 0,
+    /// Affinity level 3.
+    aff3: u8,
+    /// Reserved.
+    _reserved2: u8 = 0,
+
+    const Irm = enum(u1) {
+        /// Routed to the PEs specified Aff3.Aff2.Aff1.<target_list>
+        specified = 0,
+        /// Routed to all PEs in the system excluding self.
+        all = 1,
+    };
+
+    pub fn from(affi: u32, intid: u4) IccSgi1r {
+        return .{
+            .target_list = @as(u16, 1) << @as(u4, @truncate((affi >> 0) & 0xFF)),
+            .aff1 = @truncate((affi >> 8) & 0xFF),
+            .aff2 = @truncate((affi >> 16) & 0xFF),
+            .aff3 = @truncate((affi >> 24) & 0xFF),
+            .intid = intid,
+            .irm = .specified,
+        };
+    }
 };
 
 /// ICH_LR<n>_EL2.

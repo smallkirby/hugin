@@ -43,7 +43,14 @@ pub fn initLocal() Error!void {
     arch.am.msr(.cntvoff_el2, arch.regs.Cntvoff{ .offset = 0 });
 
     // Enable interrupt.
-    try intr.enable(pintid_offset, .ppi, timerHandler);
+    intr.enable(
+        pintid_offset,
+        .ppi,
+        timerHandler,
+    ) catch |err| switch (err) {
+        hugin.intr.IntrError.AlreadyRegistered => try intr.enableLocal(pintid_offset, .ppi),
+        else => return err,
+    };
 }
 
 /// Timer interrupt handler
@@ -51,7 +58,7 @@ fn timerHandler(_: *arch.regs.Context) bool {
     const ie = lock.lockDisableIrq();
     defer lock.unlockRestoreIrq(ie);
 
-    hugin.vm.current().gicredist.inject(
+    hugin.vm.local().gicredist.inject(
         vintid,
         pintid_offset + intr.ppi_base,
     );

@@ -22,11 +22,24 @@ pub const is_runtime_test = options.is_runtime_test;
 pub const sha = options.sha;
 
 /// Console instance.
-var console: Console = .init();
+var console: Console = undefined;
 /// Whether a console is active and accepting input.
 var console_active: std.atomic.Value(bool) = .init(false);
 /// Lock for the console.
 var console_lock: SpinLock = .{};
+
+/// Initialize the console.
+pub fn initConsole(dt: dtb.Dtb, fat32: Fat32) void {
+    console = Console.init(dt, fat32);
+}
+
+/// Deactivate the console if it is active.
+pub fn deactivateConsole() void {
+    if (console_active.load(.acquire)) {
+        console_active.store(false, .release);
+        console.deactivate();
+    }
+}
 
 /// Try to put a character to the console.
 ///
@@ -37,8 +50,7 @@ pub fn put2console(c: u8) bool {
         defer console_lock.unlockRestoreIrq(ie);
 
         if (c == Console.key_to_switch) {
-            console_active.store(false, .release);
-            console.deactivate();
+            deactivateConsole();
         } else {
             console.write(c);
         }

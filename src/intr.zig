@@ -1,7 +1,11 @@
 pub const IntrError = error{
     /// The interrupt is already registered.
     AlreadyRegistered,
-};
+    /// The interrupt system is not initialized.
+    NotInitialized,
+    /// Target not found.
+    NotFound,
+} || hugin.dtb.DtbError;
 
 /// Interrupt ID.
 pub const IntrId = u10;
@@ -10,8 +14,6 @@ pub const Priority = u8;
 
 /// GIC distributor.
 var dist: hugin.arch.gicv3.Distributor = undefined;
-/// GIC redistributor.
-var redist: hugin.arch.gicv3.Redistributor = undefined;
 
 /// Base interrupt ID of SGI.
 pub const sgi_base = 0;
@@ -25,6 +27,9 @@ pub const max_num_handlers = 256;
 
 /// Interrupt handlers.
 var handlers: [max_num_handlers]Handler = [_]Handler{unhandledHandler} ** max_num_handlers;
+
+/// List of initialized GIC redistributors.
+var redists = std.AutoHashMap(u32, hugin.arch.gicv3.Redistributor).init(allocator);
 
 /// Interrupt handler function signature.
 ///
@@ -50,9 +55,40 @@ pub const Kind = enum {
 };
 
 /// Initialize interrupts.
-pub fn init(dist_range: PhysRegion, redist_range: PhysRegion) void {
-    // Initialize GIC.
-    dist, redist = arch.initInterrupts(dist_range, redist_range);
+pub fn initGlobal(dtb: hugin.dtb.Dtb) IntrError!void {
+    const gic_node = try dtb.searchNode(
+        .{ .compat = "arm,gic-v3" },
+        null,
+    ) orelse {
+        return IntrError.NotFound;
+    };
+    const dist_reg = try dtb.readRegProp(gic_node, 0) orelse {
+        return IntrError.NotFound;
+    };
+
+    dist = arch.initInterruptsGlobal(dist_reg);
+}
+
+/// Initialize interrupts locally.
+///
+/// This function must be called on each PE.
+pub fn initLocal(dtb: hugin.dtb.Dtb) IntrError!void {
+    const gic_node = try dtb.searchNode(
+        .{ .compat = "arm,gic-v3" },
+        null,
+    ) orelse {
+        return IntrError.NotFound;
+    };
+    const redist_reg = try dtb.readRegProp(gic_node, 1) orelse {
+        return IntrError.NotFound;
+    };
+
+    // Initialize GIC locally.
+    const redist = arch.initInterruptsLocal(redist_reg);
+
+    // Register the redistributor.
+    const affi = arch.getAffinity();
+    redists.put(affi, redist) catch return IntrError.NotInitialized;
 }
 
 /// Dispatches the interrupt to the appropriate handler.
@@ -76,10 +112,20 @@ pub fn enable(offset: IntrId, kind: Kind, handler: Handler) IntrError!void {
     handlers[vector] = handler;
 
     // Enable interrupt in GIC.
+    try enableLocal(offset, kind);
+}
+
+/// Enable an interrupt for the given ID and kind.
+///
+/// The handler must be already registered.
+pub fn enableLocal(offset: IntrId, kind: Kind) IntrError!void {
+    const vector = offset + kind.base();
+
+    // Enable interrupt in GIC.
+    const redist = redists.get(arch.getAffinity()) orelse return IntrError.NotInitialized;
     switch (kind) {
         .spi => arch.enableDistIntr(vector, dist),
-        .ppi => arch.enableRedistIntr(vector, redist),
-        .sgi => hugin.unimplemented("Enable SGI"),
+        .ppi, .sgi => arch.enableRedistIntr(vector, redist),
     }
 }
 
@@ -91,6 +137,8 @@ fn unhandledHandler(_: *arch.regs.Context) bool {
 // Imports
 // =============================================================
 
+const std = @import("std");
 const hugin = @import("hugin");
 const arch = hugin.arch;
+const allocator = hugin.mem.general_allocator;
 const PhysRegion = hugin.mem.PhysRegion;

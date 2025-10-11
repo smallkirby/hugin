@@ -1,13 +1,42 @@
+/// Interrupt to inject.
+pub const InjectEntry = arch.regs.IchLr;
+
+/// SGI vector to inject interrupts to other PEs.
+pub const sgi_offset = 8;
+
 /// Initialize vGIC.
 pub fn init() hugin.intr.IntrError!void {
     // Global enable vGIC.
     arch.am.msr(.ich_hcr_el2, std.mem.zeroInit(arch.regs.IchHcr, .{
         .en = true,
     }));
+
+    // Set SGI handler for virtual interrupts to other PEs.
+    intr.enable(
+        sgi_offset,
+        .sgi,
+        sgiHandler,
+    ) catch |err| switch (err) {
+        hugin.intr.IntrError.AlreadyRegistered => try intr.enableLocal(sgi_offset, .sgi),
+        else => return err,
+    };
+}
+
+/// Create a virtual interrupt entry.
+pub fn createIntr(intid: intr.IntrId, group: u1, prio: intr.Priority, pintid: ?intr.IntrId) InjectEntry {
+    return .{
+        .vintid = intid,
+        .pintid = if (pintid) |id| id else 0,
+        .prio = prio,
+        .group = group,
+        .hw = if (pintid) |_| true else false,
+        .state = .pending,
+        .nmi = false,
+    };
 }
 
 /// Register a virtual interrupt entry to the vGIC.
-pub fn pushVintr(intid: intr.IntrId, group: u1, prio: intr.Priority, pintid: ?intr.IntrId) void {
+pub fn pushVintr(entry: InjectEntry) void {
     const num_lrn: usize = arch.am.mrs(.ich_vtr_el2).list_regs + 1;
     const normed_num_lrn = @min(num_lrn, num_lrns);
 
@@ -16,19 +45,11 @@ pub fn pushVintr(intid: intr.IntrId, group: u1, prio: intr.Priority, pintid: ?in
 
         // Empty entry.
         if (lr.state == .inactive) {
-            return setListRegister(i, .{
-                .vintid = intid,
-                .pintid = if (pintid) |id| id else 0,
-                .prio = prio,
-                .group = group,
-                .hw = if (pintid) |_| true else false,
-                .state = .pending,
-                .nmi = false,
-            });
+            return setListRegister(i, entry);
         }
 
         // Same entry.
-        if (lr.vintid == intid) {
+        if (lr.vintid == entry.vintid) {
             lr.state = if (lr.state == .active) .pending_active else .pending;
             return setListRegister(i, lr);
         }
@@ -39,6 +60,37 @@ pub fn pushVintr(intid: intr.IntrId, group: u1, prio: intr.Priority, pintid: ?in
 
 /// Number of ICC_LRn_EL1 registers.
 const num_lrns = 16;
+
+/// SGI handler for virtual interrupts to other PEs.
+///
+/// This handler is executed on the target PE.
+fn sgiHandler(_: *arch.Context) bool {
+    const vm = hugin.vm.current();
+
+    {
+        const ie = vm.gicredist.lock.lockDisableIrq();
+        defer vm.gicredist.lock.unlockRestoreIrq(ie);
+
+        if (vm.gicredist.pending_injects.popFirst()) |node| {
+            const entry: *hugin.mmio.gicv3.InjectList = @fieldParentPtr("node", node);
+            pushVintr(entry.entry);
+            vm.gicredist.allocator.destroy(entry);
+        }
+    }
+
+    {
+        const ie = vm.gicdist.lock.lockDisableIrq();
+        defer vm.gicdist.lock.unlockRestoreIrq(ie);
+
+        if (vm.gicdist.pending_injects.popFirst()) |node| {
+            const entry: *hugin.mmio.gicv3.InjectList = @fieldParentPtr("node", node);
+            pushVintr(entry.entry);
+            vm.gicdist.allocator.destroy(entry);
+        }
+    }
+
+    return true;
+}
 
 fn getListRegister(index: usize) arch.regs.IchLr {
     return switch (index) {

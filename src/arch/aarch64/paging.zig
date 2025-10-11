@@ -2,6 +2,37 @@
 
 pub const PagingError = hugin.mem.MemError;
 
+/// TTBR0_EL2 value of the BSP.
+var bsp_ttbr0: ?usize = null;
+/// TCR_EL2 value of the BSP.
+var bsp_tcr: ?regs.Tcr = null;
+/// MAIR_EL2 value of the BSP.
+var bsp_mair: ?regs.Mair = null;
+
+/// Save the current PE's state to copy to other PEs.
+pub fn init() void {
+    hugin.rtt.expectEqual(null, bsp_ttbr0);
+    hugin.rtt.expectEqual(null, bsp_tcr);
+    hugin.rtt.expectEqual(null, bsp_mair);
+
+    bsp_ttbr0 = am.mrs(.ttbr0_el2).addr();
+    bsp_tcr = am.mrs(.tcr_el2);
+    bsp_mair = am.mrs(.mair_el2);
+}
+
+/// Copy the BSP's page table address and set it to the current PE's TTBR0_EL2.
+pub fn dupePaging() void {
+    hugin.rtt.expect(bsp_ttbr0 != null);
+    hugin.rtt.expect(bsp_tcr != null);
+    hugin.rtt.expect(bsp_mair != null);
+
+    log.debug("Duplicating BSP's page table @ 0x{X}", .{bsp_ttbr0.?});
+
+    am.msr(.ttbr0_el2, regs.Ttbr0.from(bsp_ttbr0.?));
+    am.msr(.tcr_el2, bsp_tcr.?);
+    am.msr(.mair_el2, bsp_mair.?);
+}
+
 /// Initialize Stage 2 translation table.
 pub fn initS2Table(allocator: PageAllocator) PagingError!void {
     const parange = am.mrs(.id_aa64mmfr0_el1).parange;

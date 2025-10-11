@@ -319,6 +319,8 @@ const Parser = struct {
     ///
     /// Pointer is not advanced.
     fn peekChunk(self: *Parser) DtbError!Chunk {
+        hugin.rtt.expectEqual(0, self.ptr % token_align);
+
         if (self.ptr >= self.header.structAddr() + self.header.structSize()) {
             return DtbError.UnexpectedEof;
         } else {

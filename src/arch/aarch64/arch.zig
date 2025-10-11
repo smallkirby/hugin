@@ -8,24 +8,48 @@ pub const regs = @import("registers.zig"); // TODO: should not be exported.
 /// Register context.
 pub const Context = regs.Context;
 
+/// Fetch the BSP's page table address and set it to the current PE's TTBR0_EL2.
+pub fn dupPaging() void {
+    paging.dupePaging();
+}
+
+/// Get the current PE's affinity value.
+pub fn getAffinity() u32 {
+    return am.mrs(.mpidr_el1).packedAffinity();
+}
+
+/// Save BSP's context for later duplication to APs.
+pub fn saveBspContext() void {
+    paging.init();
+}
+
 /// Initialize paging.
 pub fn initPaging(ipa: usize, pa: usize, size: usize, pallocator: PageAllocator) Error!void {
     try paging.initS2Table(pallocator);
     try paging.mapS2(ipa, pa, size, pallocator);
 }
 
-/// Initialize interrupts for EL2.
-pub fn initInterrupts(dist_base: PhysRegion, redist_base: PhysRegion) struct { gicv3.Distributor, gicv3.Redistributor } {
+/// Initialize interrupts globally for EL2.
+pub fn initInterruptsGlobal(dist_base: PhysRegion) gicv3.Distributor {
+    // Initialize GIC distributor.
+    const dist = gicv3.Distributor.new(dist_base);
+    dist.init();
+
+    return dist;
+}
+
+/// Initialize interrupts locally for EL2.
+///
+/// This function must be called on each PE.
+pub fn initInterruptsLocal(redist_base: PhysRegion) gicv3.Redistributor {
     // Set handlers.
     isr.init();
 
-    // Initialize GIC distributor and redistributor.
-    const dist = gicv3.Distributor.new(dist_base);
-    dist.init();
+    // Initialize GIC redistributor.
     const redist = gicv3.Redistributor.new(redist_base);
     redist.init();
 
-    return .{ dist, redist };
+    return redist;
 }
 
 /// Disable all interrupts.
