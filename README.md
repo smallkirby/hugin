@@ -23,7 +23,7 @@ zig build test --summary all
 | `optimize` | String: `Debug`, `ReleaseFast`, `ReleaseSmall` | Optimization level. | `Debug` |
 | `runtime_test` | Flag | Enable runtime tests. | `false` |
 | `uboot` | String | Path to U-Boot install directory. | `"$HOME/u-boot"` |
-| `image` | String | Path to Linux kernel image file. | `"$(pwd)/Image"` |
+| `guest` | String | Path to Linux kernel image file. | `"$(pwd)/Image"` |
 | `guestdisk` | String | Path to guest disk image file. | `"$(pwd)/DISK0"` |
 | `qemu` | String | Path to QEMU aarch64 install directory. | `"$HOME/qemu-aarch64"` |
 | `vfat` | Flag | Use QEMU Virtual FAT filesystem. | `false` |
